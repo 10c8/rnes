@@ -164,7 +164,7 @@ impl CPU {
                 0x8A => self.op_txa(),
                 0x8C => self.op_sty_abs(),
                 // 0x8D => self.op_sta_abs(),
-                // 0x8E => self.op_stx_abs(),
+                0x8E => self.op_stx_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0x9 => match opcode {
@@ -1564,6 +1564,31 @@ impl CPU {
         );
 
         self.memory_write(address, self.registers.y);
+
+        self.cycles += 4;
+    }
+
+    fn op_stx_abs(&mut self) {
+        // STX - Store Index X In Memory
+        // M = X                             N Z C I D V
+        //                                   - - - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      STX oper     8E        3      4
+
+        let address = self.memory_read_u16(self.registers.pc);
+        self.registers.pc += 2;
+
+        let initial = self.memory_read(address);
+
+        self.trace_opcode(
+            3,
+            format!("8E {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("STX ${:04X} = {:02X}", address, initial),
+        );
+
+        self.memory_write(address, self.registers.x);
 
         self.cycles += 4;
     }
