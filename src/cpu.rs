@@ -109,7 +109,7 @@ impl CPU {
             },
             0x4 => match opcode {
                 0x40 => self.op_rti(),
-                // 0x41 => self.op_eor_ind_x(),
+                0x41 => self.op_eor_ind_x(),
                 // 0x45 => self.op_eor_zpg(),
                 // 0x46 => self.op_lsr_zpg(),
                 0x48 => self.op_pha(),
@@ -1210,6 +1210,44 @@ impl CPU {
 
         let pc = self.stack_pop_u16();
         self.registers.pc = pc;
+
+        self.cycles += 6;
+    }
+
+    fn op_eor_ind_x(&mut self) {
+        // EOR - Exclusive OR
+        // A = A XOR M                       N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler     op   bytes cycles
+        // ---------------------------------------------
+        // X(indirect,X) EOR (oper,X)  41       2      6
+
+        let operator = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        let indirect = operator.wrapping_add(self.registers.x);
+        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
+        let address_lo = self.memory_read(indirect as u16) as u16;
+        let address = (address_hi << 8) | address_lo;
+        let value = self.memory_read(address);
+
+        self.trace_opcode(
+            2,
+            format!("41 {:02X}", operator),
+            format!(
+                "EOR (${:02X},X) @ {:02X} = {:04X} = {:02X}",
+                operator, indirect, address, value
+            ),
+        );
+
+        self.registers.a ^= value;
+
+        let n = self.registers.a & 0x80 != 0;
+        let z = self.registers.a == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 6;
     }
