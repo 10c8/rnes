@@ -210,7 +210,7 @@ impl CPU {
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0xC => match opcode {
-                // 0xC0 => self.op_cpy_imm(),
+                0xC0 => self.op_cpy_imm(),
                 // 0xC1 => self.op_cmp_x_ind(),
                 // 0xC4 => self.op_cpy_zpg(),
                 // 0xC5 => self.op_cmp_zpg(),
@@ -1723,6 +1723,38 @@ impl CPU {
     }
 
     // Opcodes C0-CF
+    fn op_cpy_imm(&mut self) {
+        // CPY - Compare Memory And Index Y
+        // Y - M                             N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // immediate     CPY #oper    C0        2      2
+
+        let value = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        self.trace_opcode(
+            2,
+            format!("C0 {:02X}", value),
+            format!("CPY #${:02X}", value),
+        );
+
+        let y = self.registers.y;
+        let result = y.wrapping_sub(value);
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+        let c = y >= value;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+
+        self.cycles += 2;
+    }
+
     fn op_cmp_imm(&mut self) {
         // CMP - Compare Memory With Accumulator
         // A - M                             N Z C I D V
