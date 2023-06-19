@@ -319,10 +319,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage      ORA oper      05       2      3
 
-        let address = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let value = self.memory_read(address as u16);
+        let (address, value) = self.zeropage();
 
         self.trace_opcode(
             2,
@@ -344,8 +341,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage      ASL oper      06       2      5
 
-        let address = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let (address, mut value) = self.zeropage();
 
         self.trace_opcode(
             2,
@@ -353,8 +349,8 @@ impl CPU {
             format!("ASL ${:02X}", address),
         );
 
-        let mut value = self.memory_read(address as u16);
         let c = value & 0x80 != 0;
+
         value <<= 1;
 
         self.memory_write(address as u16, value);
@@ -395,8 +391,7 @@ impl CPU {
         // ---------------------------------------------
         // immediate     ORA #oper     09       2      2
 
-        let value = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let value = self.immediate();
 
         self.trace_opcode(
             2,
@@ -443,10 +438,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute      ORA oper      0D       3      4
 
-        let address = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
-
-        let value = self.memory_read(address);
+        let (address, value) = self.absolute();
 
         self.trace_opcode(
             3,
@@ -468,11 +460,10 @@ impl CPU {
         // ---------------------------------------------
         // absolute      ASL oper      0E       3      6
 
-        let address = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
+        let (address, mut value) = self.absolute();
 
-        let mut value = self.memory_read(address);
         let c = value & 0x80 != 0;
+
         value <<= 1;
 
         self.trace_opcode(
@@ -503,7 +494,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BPL oper     10        2    2**
 
-        let (offset, address) = self.branch_address();
+        let (offset, address) = self.relative();
 
         self.trace_opcode(
             2,
@@ -525,13 +516,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect),Y  ORA ($oper),Y 11       2     5*
 
-        let operator = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let base = self.memory_read_u16(operator as u16);
-        let address = base.wrapping_add(self.registers.y as u16);
-
-        let value = self.memory_read(address);
+        let (operator, base, address, value) = self.post_indexed_indirect(self.registers.y);
 
         self.trace_opcode(
             2,
@@ -560,17 +545,12 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    ORA oper,X    15       2     4
 
-        let address = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let address = address.wrapping_add(self.registers.x);
-
-        let value = self.memory_read(address as u16);
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
 
         self.trace_opcode(
             2,
-            format!("15 {:02X}", address),
-            format!("ORA ${:02X},X @ {:02X} = {:02X}", address, address, value),
+            format!("15 {:02X}", operator),
+            format!("ORA ${:02X},X @ {:02X} = {:02X}", operator, address, value),
         );
 
         self.acc_or(value);
@@ -587,13 +567,10 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    ASL oper,X    16       2      6
 
-        let operator = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let (operator, address, mut value) = self.indexed_zeropage(self.registers.x);
 
-        let address = operator.wrapping_add(self.registers.x);
-
-        let mut value = self.memory_read(address as u16);
         let c = value & 0x80 != 0;
+
         value <<= 1;
 
         self.trace_opcode(
@@ -639,12 +616,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,Y    ORA oper,Y    19       3     4*
 
-        let operator = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
-
-        let address = operator.wrapping_add(self.registers.y as u16);
-
-        let value = self.memory_read(address);
+        let (operator, address, value) = self.indexed_absolute(self.registers.y);
 
         self.trace_opcode(
             3,
@@ -670,12 +642,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    ORA $oper,X   1D       3     4*
 
-        let operator = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
-
-        let address = operator.wrapping_add(self.registers.x as u16);
-
-        let value = self.memory_read(address);
+        let (operator, address, value) = self.indexed_absolute(self.registers.x);
 
         self.trace_opcode(
             3,
@@ -701,13 +668,10 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    ASL $oper,X   1E       3      7
 
-        let operator = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
+        let (operator, address, mut value) = self.indexed_absolute(self.registers.x);
 
-        let address = operator.wrapping_add(self.registers.x as u16);
-
-        let mut value = self.memory_read(address);
         let c = value & 0x80 != 0;
+
         value <<= 1;
 
         self.trace_opcode(
@@ -761,7 +725,7 @@ impl CPU {
         //
         // addressing    assembler     op   bytes cycles
         // ---------------------------------------------
-        // X,indirect    AND (oper,X)  21       2      6
+        // (indirect,X)  AND (oper,X)  21       2      6
 
         let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
 
@@ -794,10 +758,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage      BIT oper     24        2      3
 
-        let address = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let value = self.memory_read(address as u16);
+        let (address, value) = self.zeropage();
 
         self.trace_opcode(
             2,
@@ -825,10 +786,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage      AND oper      25       2      3
 
-        let address = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let value = self.memory_read(address as u16);
+        let (address, value) = self.zeropage();
 
         self.trace_opcode(
             2,
@@ -856,11 +814,10 @@ impl CPU {
         // ---------------------------------------------
         // zeropage      ROL oper      26       2      5
 
-        let address = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let (address, mut value) = self.zeropage();
 
-        let mut value = self.memory_read(address as u16);
         let c = value & 0x80 != 0;
+
         value <<= 1;
 
         if self.registers.get_status_flag(StatusFlag::Carry) {
@@ -913,8 +870,7 @@ impl CPU {
         // ---------------------------------------------
         // immediate     AND #oper     29       2      2
 
-        let value = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let value = self.immediate();
 
         self.trace_opcode(
             2,
@@ -973,10 +929,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute      BIT $oper     2C       3      4
 
-        let address = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
-
-        let value = self.memory_read(address);
+        let (address, value) = self.absolute();
 
         self.trace_opcode(
             3,
@@ -1004,10 +957,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute      AND $oper     2D       3      4
 
-        let address = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
-
-        let value = self.memory_read(address);
+        let (address, value) = self.absolute();
 
         self.trace_opcode(
             3,
@@ -1035,11 +985,10 @@ impl CPU {
         // ---------------------------------------------
         // absolute      ROL $oper     2E       3      6
 
-        let address = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
+        let (address, mut value) = self.absolute();
 
-        let mut value = self.memory_read(address);
         let c = value & 0x80 != 0;
+
         value <<= 1;
 
         if self.registers.get_status_flag(StatusFlag::Carry) {
@@ -1074,7 +1023,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BMI oper     30        2    2**
 
-        let (offset, address) = self.branch_address();
+        let (offset, address) = self.relative();
 
         self.trace_opcode(
             2,
@@ -1133,7 +1082,7 @@ impl CPU {
         //
         // addressing    assembler     op   bytes cycles
         // ---------------------------------------------
-        // X(indirect,X) EOR (oper,X)  41       2      6
+        // (indirect,X) EOR (oper,X)   41       2      6
 
         let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
 
@@ -1176,8 +1125,7 @@ impl CPU {
         // ---------------------------------------------
         // immediate     EOR #oper    49        2      2
 
-        let value = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let value = self.immediate();
 
         self.trace_opcode(
             2,
@@ -1246,7 +1194,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BVC oper     50        2    2**
 
-        let (offset, address) = self.branch_address();
+        let (offset, address) = self.relative();
 
         self.trace_opcode(
             2,
@@ -1334,8 +1282,7 @@ impl CPU {
         // ---------------------------------------------
         // immediate     ADC #oper    69        2      2
 
-        let value = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let value = self.immediate();
 
         self.trace_opcode(
             2,
@@ -1388,7 +1335,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BVS oper     70        2    2**
 
-        let (offset, address) = self.branch_address();
+        let (offset, address) = self.relative();
 
         self.trace_opcode(
             2,
@@ -1452,10 +1399,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage      STA oper     85        2      3
 
-        let address = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let initial = self.memory_read(address as u16);
+        let (address, initial) = self.zeropage();
 
         self.trace_opcode(
             2,
@@ -1477,10 +1421,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage      STX oper     86        2      3
 
-        let address = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let initial = self.memory_read(address as u16);
+        let (address, initial) = self.zeropage();
 
         self.trace_opcode(
             2,
@@ -1546,10 +1487,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute      STY oper     8C        3      4
 
-        let address = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
-
-        let initial = self.memory_read(address);
+        let (address, initial) = self.absolute();
 
         self.trace_opcode(
             3,
@@ -1571,10 +1509,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute      STA oper     8D        3      4
 
-        let address = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
-
-        let initial = self.memory_read(address);
+        let (address, initial) = self.absolute();
 
         self.trace_opcode(
             3,
@@ -1596,10 +1531,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute      STX oper     8E        3      4
 
-        let address = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
-
-        let initial = self.memory_read(address);
+        let (address, initial) = self.absolute();
 
         self.trace_opcode(
             3,
@@ -1622,7 +1554,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BCC oper     90        2    2**
 
-        let (offset, address) = self.branch_address();
+        let (offset, address) = self.relative();
 
         self.trace_opcode(
             2,
@@ -1683,8 +1615,7 @@ impl CPU {
         // ---------------------------------------------
         // immediate     LDY #oper    A0        2      2
 
-        let value = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let value = self.immediate();
 
         self.trace_opcode(
             2,
@@ -1737,8 +1668,7 @@ impl CPU {
         // ---------------------------------------------
         // immediate     LDX #oper    A2        2      2
 
-        let value = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let value = self.immediate();
 
         self.trace_opcode(
             2,
@@ -1760,10 +1690,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage      LDA oper     A5        2      3
 
-        let address = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let value = self.memory_read(address as u16);
+        let (address, value) = self.zeropage();
 
         self.trace_opcode(
             2,
@@ -1807,8 +1734,7 @@ impl CPU {
         // ---------------------------------------------
         // immediate     LDA #oper    A9        2      2
 
-        let value = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let value = self.immediate();
 
         self.trace_opcode(
             2,
@@ -1852,10 +1778,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute      LDA $imm     AD        3      4
 
-        let address = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
-
-        let value = self.memory_read(address);
+        let (address, value) = self.absolute();
 
         self.trace_opcode(
             3,
@@ -1877,10 +1800,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute      LDX $imm     AE        3     4*
 
-        let address = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
-
-        let value = self.memory_read(address);
+        let (address, value) = self.absolute();
 
         self.trace_opcode(
             3,
@@ -1907,7 +1827,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BCS oper     B0        2    2**
 
-        let (offset, address) = self.branch_address();
+        let (offset, address) = self.relative();
 
         self.trace_opcode(
             2,
@@ -1968,8 +1888,7 @@ impl CPU {
         // ---------------------------------------------
         // immediate     CPY #oper    C0        2      2
 
-        let value = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let value = self.immediate();
 
         self.trace_opcode(
             2,
@@ -2047,8 +1966,7 @@ impl CPU {
         // ---------------------------------------------
         // immediate     CMP #oper    C9        2      2
 
-        let value = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let value = self.immediate();
 
         self.trace_opcode(
             2,
@@ -2102,7 +2020,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BNE oper     D0        2    2**
 
-        let (offset, address) = self.branch_address();
+        let (offset, address) = self.relative();
 
         self.trace_opcode(
             2,
@@ -2141,8 +2059,7 @@ impl CPU {
         // ---------------------------------------------
         // immediate     CPX #oper    E0        2      2
 
-        let value = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let value = self.immediate();
 
         self.trace_opcode(
             2,
@@ -2195,8 +2112,7 @@ impl CPU {
         // ---------------------------------------------
         // immediate     SBC #oper    E9        2      2
 
-        let value = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+        let value = self.immediate();
 
         self.trace_opcode(
             2,
@@ -2246,7 +2162,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BEQ oper     F0        2    2**
 
-        let (offset, address) = self.branch_address();
+        let (offset, address) = self.relative();
 
         self.trace_opcode(
             2,
@@ -2276,6 +2192,53 @@ impl CPU {
     }
 
     // Addressing
+    fn zeropage(&mut self) -> (u16, u8) {
+        let address = self.memory_read(self.registers.pc) as u16;
+        self.registers.pc += 1;
+
+        let value = self.memory_read(address);
+
+        (address, value)
+    }
+
+    fn immediate(&mut self) -> u8 {
+        let value = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        value
+    }
+
+    fn absolute(&mut self) -> (u16, u8) {
+        let address = self.memory_read_u16(self.registers.pc);
+        self.registers.pc += 2;
+
+        let value = self.memory_read(address);
+
+        (address, value)
+    }
+
+    fn indexed_absolute(&mut self, index: u8) -> (u16, u16, u8) {
+        let operator = self.memory_read_u16(self.registers.pc);
+        self.registers.pc += 2;
+
+        let address = operator.wrapping_add(index as u16);
+
+        let value = self.memory_read(address);
+
+        (operator, address, value)
+    }
+
+    fn indexed_zeropage(&mut self, index: u8) -> (u8, u8, u8) {
+        let operator = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        let address = operator.wrapping_add(index);
+
+        let value = self.memory_read(address as u16);
+
+        (operator, address, value)
+    }
+
     fn pre_indexed_indirect(&mut self, index: u8) -> (u8, u8, u16, u8) {
         let operator = self.memory_read(self.registers.pc);
         self.registers.pc += 1;
@@ -2291,7 +2254,19 @@ impl CPU {
         (operator, indirect, address, value)
     }
 
-    fn branch_address(&mut self) -> (i8, u16) {
+    fn post_indexed_indirect(&mut self, index: u8) -> (u8, u16, u16, u8) {
+        let operator = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        let base = self.memory_read_u16(operator as u16);
+        let address = base.wrapping_add(index as u16);
+
+        let value = self.memory_read(address);
+
+        (operator, base, address, value)
+    }
+
+    fn relative(&mut self) -> (i8, u16) {
         let offset = self.memory_read(self.registers.pc) as i8;
         self.registers.pc += 1;
 
