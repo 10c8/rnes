@@ -174,7 +174,7 @@ impl CPU {
                 // 0x94 => self.op_sty_zpg_x(),
                 // 0x95 => self.op_sta_zpg_x(),
                 // 0x96 => self.op_stx_zpg_y(),
-                // 0x98 => self.op_tya(),
+                0x98 => self.op_tya(),
                 // 0x99 => self.op_sta_abs_y(),
                 0x9A => self.op_txs(),
                 // 0x9D => self.op_sta_abs_x(),
@@ -1556,6 +1556,28 @@ impl CPU {
         self.cycles += 2;
     }
 
+    fn op_tya(&mut self) {
+        // TYA - Transfer Index Y To ACC
+        // A = Y                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // implied       TYA          98        1      2
+
+        self.trace_opcode(1, "98", "TYA");
+
+        self.registers.a = self.registers.y;
+
+        let n = self.registers.a & 0x80 != 0;
+        let z = self.registers.a == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 2;
+    }
+
     fn op_txs(&mut self) {
         // TXS - Transfer Index X To Stack Pointer
         // SP = X                            N Z C I D V
@@ -1632,7 +1654,7 @@ impl CPU {
     }
 
     fn op_tay(&mut self) {
-        // TAY - Transfer Accumulator To Index Y
+        // TAY - Transfer ACC To Index Y
         // Y = A                             N Z C I D V
         //                                   + + - - - -
         //
@@ -1683,7 +1705,7 @@ impl CPU {
     }
 
     fn op_tax(&mut self) {
-        // TAX - Transfer Accumulator To Index X
+        // TAX - Transfer ACC To Index X
         // X = A                             N Z C I D V
         //                                   + + - - - -
         //
