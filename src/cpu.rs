@@ -240,7 +240,7 @@ impl CPU {
                 // 0xE4 => self.op_cpx_zpg(),
                 // 0xE5 => self.op_sbc_zpg(),
                 // 0xE6 => self.op_inc_zpg(),
-                // 0xE8 => self.op_inx(),
+                0xE8 => self.op_inx(),
                 0xE9 => self.op_sbc_imm(),
                 0xEA => self.op_nop(),
                 // 0xEC => self.op_cpx_abs(),
@@ -1888,6 +1888,28 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
         self.registers.set_status_flag(StatusFlag::Carry, c);
+
+        self.cycles += 2;
+    }
+
+    fn op_inx(&mut self) {
+        // INX - Increment Index X By One
+        // X = X + 1                         N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // implied       INX          E8        1      2
+
+        self.trace_opcode(1, "E8", "INX");
+
+        self.registers.x = self.registers.x.wrapping_add(1);
+
+        let n = self.registers.x & 0x80 != 0;
+        let z = self.registers.x == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
