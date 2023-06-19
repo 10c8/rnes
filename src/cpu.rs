@@ -187,7 +187,7 @@ impl CPU {
                 // 0xA4 => self.op_ldy_zpg(),
                 // 0xA5 => self.op_lda_zpg(),
                 // 0xA6 => self.op_ldx_zpg(),
-                // 0xA8 => self.op_tay(),
+                0xA8 => self.op_tay(),
                 0xA9 => self.op_lda_imm(),
                 // 0xAA => self.op_tax(),
                 // 0xAC => self.op_ldy_abs(),
@@ -1624,6 +1624,28 @@ impl CPU {
 
         let n = self.registers.x & 0x80 != 0;
         let z = self.registers.x == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 2;
+    }
+
+    fn op_tay(&mut self) {
+        // TAY - Transfer Accumulator To Index Y
+        // Y = A                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // implied       TAY          A8        1      2
+
+        self.trace_opcode(1, "A8", "TAY");
+
+        self.registers.y = self.registers.a;
+
+        let n = self.registers.y & 0x80 != 0;
+        let z = self.registers.y == 0;
 
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
