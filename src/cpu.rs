@@ -138,7 +138,7 @@ impl CPU {
                 // 0x66 => self.op_ror_zpg(),
                 0x68 => self.op_pla(),
                 0x69 => self.op_adc_imm(),
-                // 0x6A => self.op_ror_acc(),
+                0x6A => self.op_ror_acc(),
                 // 0x6C => self.op_jmp_abs_ind(),
                 // 0x6D => self.op_adc_abs(),
                 // 0x6E => self.op_ror_abs(),
@@ -1414,6 +1414,36 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Zero, z);
         self.registers.set_status_flag(StatusFlag::Carry, c);
         self.registers.set_status_flag(StatusFlag::Overflow, v);
+
+        self.cycles += 2;
+    }
+
+    fn op_ror_acc(&mut self) {
+        // ROR - Rotate Right One Bit (ACC)
+        // C -> [76543210] -> C              N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // accumulator   ROR A        6A        1      2
+
+        self.trace_opcode(1, "6A", "ROR A");
+
+        let a = self.registers.a;
+        let c = self.registers.get_status_flag(StatusFlag::Carry) as u8;
+
+        let carry = if a & 0x01 != 0 { 1 } else { 0 };
+        let result = (a >> 1) | (c << 7);
+
+        self.registers.a = result;
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+        let c = carry != 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.registers.set_status_flag(StatusFlag::Carry, c);
 
         self.cycles += 2;
     }
