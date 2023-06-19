@@ -185,7 +185,7 @@ impl CPU {
                 0xA2 => self.op_ldx_imm(),
                 0xA4 => self.op_ldy_zpg(),
                 0xA5 => self.op_lda_zpg(),
-                // 0xA6 => self.op_ldx_zpg(),
+                0xA6 => self.op_ldx_zpg(),
                 0xA8 => self.op_tay(),
                 0xA9 => self.op_lda_imm(),
                 0xAA => self.op_tax(),
@@ -324,7 +324,7 @@ impl CPU {
         self.trace_opcode(
             2,
             format!("05 {:02X}", address),
-            format!("ORA ${:02X}", address),
+            format!("ORA ${:02X} = {:02X}", address, value),
         );
 
         self.acc_or(value);
@@ -1749,6 +1749,28 @@ impl CPU {
         );
 
         self.acc_load(value);
+
+        self.cycles += 3;
+    }
+
+    fn op_ldx_zpg(&mut self) {
+        // LDX - Load Index X With Memory
+        // X = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage      LDX oper     A6        2      3
+
+        let (address, value) = self.zeropage();
+
+        self.trace_opcode(
+            2,
+            format!("A6 {:02X}", address),
+            format!("LDX ${:02X} = {:02X}", address, value),
+        );
+
+        self.x_load(value);
 
         self.cycles += 3;
     }
