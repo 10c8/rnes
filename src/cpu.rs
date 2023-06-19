@@ -210,7 +210,7 @@ impl CPU {
             },
             0xC => match opcode {
                 0xC0 => self.op_cpy_imm(),
-                // 0xC1 => self.op_cmp_ind_x(),
+                0xC1 => self.op_cmp_ind_x(),
                 // 0xC4 => self.op_cpy_zpg(),
                 // 0xC5 => self.op_cmp_zpg(),
                 // 0xC6 => self.op_dec_zpg(),
@@ -294,15 +294,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect,X)  ORA (oper,X)  01       2      6
 
-        let operator = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let indirect = operator.wrapping_add(self.registers.x);
-        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
-        let address_lo = self.memory_read(indirect as u16) as u16;
-        let address = (address_hi << 8) | address_lo;
-
-        let value = self.memory_read(address);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
 
         self.trace_opcode(
             2,
@@ -511,14 +503,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BPL oper     10        2    2**
 
-        let offset = self.memory_read(self.registers.pc) as i8;
-        self.registers.pc += 1;
-
-        let address = if offset.is_negative() {
-            self.registers.pc.wrapping_sub(offset.wrapping_abs() as u16)
-        } else {
-            self.registers.pc.wrapping_add(offset as u16)
-        };
+        let (offset, address) = self.branch_address();
 
         self.trace_opcode(
             2,
@@ -526,15 +511,7 @@ impl CPU {
             format!("BPL ${:04X}", address),
         );
 
-        if !self.registers.get_status_flag(StatusFlag::Negative) {
-            self.cycles += 1;
-
-            if self.registers.pc & 0xFF00 != address & 0xFF00 {
-                self.cycles += 1;
-            }
-
-            self.registers.pc = address;
-        }
+        self.branch_if(StatusFlag::Negative, false, address);
 
         self.cycles += 2;
     }
@@ -786,15 +763,7 @@ impl CPU {
         // ---------------------------------------------
         // X,indirect    AND (oper,X)  21       2      6
 
-        let operator = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let indirect = operator.wrapping_add(self.registers.x);
-        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
-        let address_lo = self.memory_read(indirect as u16) as u16;
-        let address = (address_hi << 8) | address_lo;
-
-        let value = self.memory_read(address);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
 
         self.trace_opcode(
             2,
@@ -1105,14 +1074,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BMI oper     30        2    2**
 
-        let offset = self.memory_read(self.registers.pc) as i8;
-        self.registers.pc += 1;
-
-        let address = if offset.is_negative() {
-            self.registers.pc.wrapping_sub(offset.abs() as u16)
-        } else {
-            self.registers.pc.wrapping_add(offset as u16)
-        };
+        let (offset, address) = self.branch_address();
 
         self.trace_opcode(
             2,
@@ -1120,15 +1082,7 @@ impl CPU {
             format!("BMI ${:04X}", address),
         );
 
-        if self.registers.get_status_flag(StatusFlag::Negative) {
-            self.cycles += 1;
-
-            if self.registers.pc & 0xFF00 != address & 0xFF00 {
-                self.cycles += 1;
-            }
-
-            self.registers.pc = address;
-        }
+        self.branch_if(StatusFlag::Negative, true, address);
 
         self.cycles += 2;
     }
@@ -1181,15 +1135,7 @@ impl CPU {
         // ---------------------------------------------
         // X(indirect,X) EOR (oper,X)  41       2      6
 
-        let operator = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let indirect = operator.wrapping_add(self.registers.x);
-        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
-        let address_lo = self.memory_read(indirect as u16) as u16;
-        let address = (address_hi << 8) | address_lo;
-
-        let value = self.memory_read(address);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
 
         self.trace_opcode(
             2,
@@ -1300,14 +1246,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BVC oper     50        2    2**
 
-        let offset = self.memory_read(self.registers.pc) as i8;
-        self.registers.pc += 1;
-
-        let address = if offset.is_negative() {
-            self.registers.pc.wrapping_sub(offset.wrapping_abs() as u16)
-        } else {
-            self.registers.pc.wrapping_add(offset as u16)
-        };
+        let (offset, address) = self.branch_address();
 
         self.trace_opcode(
             2,
@@ -1315,15 +1254,7 @@ impl CPU {
             format!("BVC ${:04X}", address),
         );
 
-        if !self.registers.get_status_flag(StatusFlag::Overflow) {
-            self.cycles += 1;
-
-            if self.registers.pc & 0xFF00 != address & 0xFF00 {
-                self.cycles += 1;
-            }
-
-            self.registers.pc = address;
-        }
+        self.branch_if(StatusFlag::Overflow, false, address);
 
         self.cycles += 2;
     }
@@ -1355,15 +1286,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect,X)  ADC (oper,X) 61        2     6*
 
-        let operator = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let indirect = operator.wrapping_add(self.registers.x);
-        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
-        let address_lo = self.memory_read(indirect as u16) as u16;
-        let address = (address_hi << 8) | address_lo;
-
-        let value = self.memory_read(address);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
 
         self.trace_opcode(
             2,
@@ -1465,14 +1388,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BVS oper     70        2    2**
 
-        let offset = self.memory_read(self.registers.pc) as i8;
-        self.registers.pc += 1;
-
-        let address = if offset.is_negative() {
-            self.registers.pc.wrapping_sub(offset.wrapping_abs() as u16)
-        } else {
-            self.registers.pc.wrapping_add(offset as u16)
-        };
+        let (offset, address) = self.branch_address();
 
         self.trace_opcode(
             2,
@@ -1480,15 +1396,7 @@ impl CPU {
             format!("BVS ${:04X}", address),
         );
 
-        if self.registers.get_status_flag(StatusFlag::Overflow) {
-            self.cycles += 1;
-
-            if self.registers.pc & 0xFF00 != address & 0xFF00 {
-                self.cycles += 1;
-            }
-
-            self.registers.pc = address;
-        }
+        self.branch_if(StatusFlag::Overflow, true, address);
 
         self.cycles += 2;
     }
@@ -1519,15 +1427,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect,X)  STA (oper,X) 81        2      6
 
-        let operator = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let indirect = operator.wrapping_add(self.registers.x);
-        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
-        let address_lo = self.memory_read(indirect as u16) as u16;
-        let address = (address_hi << 8) | address_lo;
-
-        let value = self.memory_read(address);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
 
         self.trace_opcode(
             2,
@@ -1722,10 +1622,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BCC oper     90        2    2**
 
-        let offset = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let address = self.registers.pc.wrapping_add(offset as u16);
+        let (offset, address) = self.branch_address();
 
         self.trace_opcode(
             2,
@@ -1733,15 +1630,7 @@ impl CPU {
             format!("BCC ${:04X}", address),
         );
 
-        if !self.registers.get_status_flag(StatusFlag::Carry) {
-            self.cycles += 1;
-
-            if self.registers.pc & 0xFF00 != address & 0xFF00 {
-                self.cycles += 1;
-            }
-
-            self.registers.pc = address;
-        }
+        self.branch_if(StatusFlag::Carry, false, address);
 
         self.cycles += 2;
     }
@@ -1823,15 +1712,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect,X)  LDA (oper,X) A1        2     6*
 
-        let operator = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let indirect = operator.wrapping_add(self.registers.x);
-        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
-        let address_lo = self.memory_read(indirect as u16) as u16;
-        let address = (address_hi << 8) | address_lo;
-
-        let value = self.memory_read(address);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
 
         self.trace_opcode(
             2,
@@ -2026,10 +1907,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BCS oper     B0        2    2**
 
-        let offset = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let address = self.registers.pc.wrapping_add(offset as u16);
+        let (offset, address) = self.branch_address();
 
         self.trace_opcode(
             2,
@@ -2037,15 +1915,7 @@ impl CPU {
             format!("BCS ${:04X}", address),
         );
 
-        if self.registers.get_status_flag(StatusFlag::Carry) {
-            self.cycles += 1;
-
-            if self.registers.pc & 0xFF00 != address & 0xFF00 {
-                self.cycles += 1;
-            }
-
-            self.registers.pc = address;
-        }
+        self.branch_if(StatusFlag::Carry, true, address);
 
         self.cycles += 2;
     }
@@ -2119,6 +1989,31 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Carry, c);
 
         self.cycles += 2;
+    }
+
+    fn op_cmp_ind_x(&mut self) {
+        // CMP - Compare Memory With Accumulator
+        // A - M                             N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // (indirect,X)  CMP (oper,X) C1        2      6
+
+        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("C1 {:02X}", operator),
+            format!(
+                "CMP (${:02X},X) @ {:02X} = {:04X} = {:02X}",
+                operator, indirect, address, value
+            ),
+        );
+
+        self.acc_compare(value);
+
+        self.cycles += 6;
     }
 
     fn op_iny(&mut self) {
@@ -2200,17 +2095,14 @@ impl CPU {
     // Opcodes D0-DF
     fn op_bne(&mut self) {
         // BNE - Branch If Not Equal
-        // branch if Z neq 0                 N Z C I D V
+        // branch if Z eq 0                  N Z C I D V
         //                                   - - - - - -
         //
         // addressing    assembler    op    bytes cycles
         // ---------------------------------------------
         // relative      BNE oper     D0        2    2**
 
-        let offset = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let address = self.registers.pc.wrapping_add(offset as u16);
+        let (offset, address) = self.branch_address();
 
         self.trace_opcode(
             2,
@@ -2218,15 +2110,7 @@ impl CPU {
             format!("BNE ${:04X}", address),
         );
 
-        if !self.registers.get_status_flag(StatusFlag::Zero) {
-            self.cycles += 1;
-
-            if self.registers.pc & 0xFF00 != address & 0xFF00 {
-                self.cycles += 1;
-            }
-
-            self.registers.pc = address;
-        }
+        self.branch_if(StatusFlag::Zero, false, address);
 
         self.cycles += 2;
     }
@@ -2362,10 +2246,7 @@ impl CPU {
         // ---------------------------------------------
         // relative      BEQ oper     F0        2    2**
 
-        let offset = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let address = self.registers.pc.wrapping_add(offset as u16);
+        let (offset, address) = self.branch_address();
 
         self.trace_opcode(
             2,
@@ -2373,15 +2254,7 @@ impl CPU {
             format!("BEQ ${:04X}", address),
         );
 
-        if self.registers.get_status_flag(StatusFlag::Zero) {
-            self.cycles += 1;
-
-            if self.registers.pc & 0xFF00 != address & 0xFF00 {
-                self.cycles += 1;
-            }
-
-            self.registers.pc = address;
-        }
+        self.branch_if(StatusFlag::Zero, true, address);
 
         self.cycles += 2;
     }
@@ -2400,6 +2273,35 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Decimal, true);
 
         self.cycles += 2;
+    }
+
+    // Addressing
+    fn pre_indexed_indirect(&mut self, index: u8) -> (u8, u8, u16, u8) {
+        let operator = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        let indirect = operator.wrapping_add(index);
+
+        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
+        let address_lo = self.memory_read(indirect as u16) as u16;
+        let address = (address_hi << 8) | address_lo;
+
+        let value = self.memory_read(address);
+
+        (operator, indirect, address, value)
+    }
+
+    fn branch_address(&mut self) -> (i8, u16) {
+        let offset = self.memory_read(self.registers.pc) as i8;
+        self.registers.pc += 1;
+
+        let address = if offset.is_negative() {
+            self.registers.pc.wrapping_sub(offset.wrapping_abs() as u16)
+        } else {
+            self.registers.pc.wrapping_add(offset as u16)
+        };
+
+        (offset, address)
     }
 
     // Operations
@@ -2431,6 +2333,19 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Overflow, v);
     }
 
+    fn acc_compare(&mut self, value: u8) {
+        let a = self.registers.a;
+        let result = a.wrapping_sub(value);
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+        let c = a >= value;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+    }
+
     fn acc_or(&mut self, value: u8) {
         self.registers.a |= value;
 
@@ -2459,6 +2374,19 @@ impl CPU {
 
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
+    }
+
+    // Branching
+    fn branch_if(&mut self, flag: StatusFlag, status: bool, address: u16) {
+        if self.registers.get_status_flag(flag) == status {
+            self.cycles += 1;
+
+            if self.registers.pc & 0xFF00 != address & 0xFF00 {
+                self.cycles += 1;
+            }
+
+            self.registers.pc = address;
+        }
     }
 
     // Memory
