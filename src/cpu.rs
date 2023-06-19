@@ -184,7 +184,7 @@ impl CPU {
                 // 0xA1 => self.op_lda_x_ind(),
                 0xA2 => self.op_ldx_imm(),
                 // 0xA4 => self.op_ldy_zpg(),
-                // 0xA5 => self.op_lda_zpg(),
+                0xA5 => self.op_lda_zpg(),
                 // 0xA6 => self.op_ldx_zpg(),
                 0xA8 => self.op_tay(),
                 0xA9 => self.op_lda_imm(),
@@ -1776,6 +1776,37 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
+    }
+
+    fn op_lda_zpg(&mut self) {
+        // LDA - Load Accumulator With Memory
+        // A = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage      LDA oper     A5        2      3
+
+        let address = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        let initial = self.memory_read(address as u16);
+
+        self.trace_opcode(
+            2,
+            format!("A5 {:02X}", address),
+            format!("LDA ${:02X} = {:02X}", address, initial),
+        );
+
+        self.registers.a = initial;
+
+        let n = self.registers.a & 0x80 != 0;
+        let z = self.registers.a == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 3;
     }
 
     fn op_tay(&mut self) {
