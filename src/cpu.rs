@@ -235,7 +235,7 @@ impl CPU {
             },
             0xE => match opcode {
                 0xE0 => self.op_cpx_imm(),
-                // 0xE1 => self.op_sbc_ind_x(),
+                0xE1 => self.op_sbc_ind_x(),
                 // 0xE4 => self.op_cpx_zpg(),
                 // 0xE5 => self.op_sbc_zpg(),
                 // 0xE6 => self.op_inc_zpg(),
@@ -2081,6 +2081,31 @@ impl CPU {
         self.cycles += 2;
     }
 
+    fn op_sbc_ind_x(&mut self) {
+        // SBC - Subtract Memory From ACC With Borrow
+        // A = A - M - C                     N Z C I D V
+        //                                   + + + - - +
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // (indirect,X)  SBC (oper,X) E1        2      6
+
+        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("E1 {:02X}", operator),
+            format!(
+                "SBC (${:02X},X) @ {:02X} = {:04X} = {:02X}",
+                operator, indirect, address, value
+            ),
+        );
+
+        self.acc_subtract(value);
+
+        self.cycles += 6;
+    }
+
     fn op_inx(&mut self) {
         // INX - Increment Index X By One
         // X = X + 1                         N Z C I D V
@@ -2301,6 +2326,25 @@ impl CPU {
         let z = result == 0;
         let c = result < a;
         let v = (a ^ result) & ((value ^ result) & 0x80) != 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Overflow, v);
+    }
+
+    fn acc_subtract(&mut self, value: u8) {
+        let a = self.registers.a;
+        let borrow = !self.registers.get_status_flag(StatusFlag::Carry) as u8;
+
+        let result = a.wrapping_sub(value).wrapping_sub(borrow);
+
+        self.registers.a = result;
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+        let c = a >= value;
+        let v = (a & 0x80) != (value & 0x80) && (a & 0x80) != (result & 0x80);
 
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
