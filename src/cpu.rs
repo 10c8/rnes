@@ -189,7 +189,7 @@ impl CPU {
                 // 0xA6 => self.op_ldx_zpg(),
                 0xA8 => self.op_tay(),
                 0xA9 => self.op_lda_imm(),
-                // 0xAA => self.op_tax(),
+                0xAA => self.op_tax(),
                 // 0xAC => self.op_ldy_abs(),
                 0xAD => self.op_lda_abs(),
                 // 0xAE => self.op_ldx_abs(),
@@ -1675,6 +1675,28 @@ impl CPU {
 
         let n = self.registers.a & 0x80 != 0;
         let z = self.registers.a == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 2;
+    }
+
+    fn op_tax(&mut self) {
+        // TAX - Transfer Accumulator To Index X
+        // X = A                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // implied       TAX          AA        1      2
+
+        self.trace_opcode(1, "AA", "TAX");
+
+        self.registers.x = self.registers.a;
+
+        let n = self.registers.x & 0x80 != 0;
+        let z = self.registers.x == 0;
 
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
