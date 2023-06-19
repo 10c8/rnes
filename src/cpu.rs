@@ -61,7 +61,7 @@ impl CPU {
         match (opcode & 0xF0) >> 4 {
             0x0 => match opcode {
                 0x00 => self.op_brk(),
-                0x01 => self.op_ora_x_ind(),
+                0x01 => self.op_ora_ind_x(),
                 0x05 => self.op_ora_zpg(),
                 0x06 => self.op_asl_zpg(),
                 0x08 => self.op_php(),
@@ -84,7 +84,7 @@ impl CPU {
             },
             0x2 => match opcode {
                 0x20 => self.op_jsr(),
-                0x21 => self.op_and_x_ind(),
+                0x21 => self.op_and_ind_x(),
                 0x24 => self.op_bit_zpg(),
                 0x25 => self.op_and_zpg(),
                 0x26 => self.op_rol_zpg(),
@@ -109,7 +109,7 @@ impl CPU {
             },
             0x4 => match opcode {
                 0x40 => self.op_rti(),
-                // 0x41 => self.op_eor_x_ind(),
+                // 0x41 => self.op_eor_ind_x(),
                 // 0x45 => self.op_eor_zpg(),
                 // 0x46 => self.op_lsr_zpg(),
                 0x48 => self.op_pha(),
@@ -133,7 +133,7 @@ impl CPU {
             },
             0x6 => match opcode {
                 0x60 => self.op_rts(),
-                // 0x61 => self.op_adc_x_ind(),
+                // 0x61 => self.op_adc_ind_x(),
                 // 0x65 => self.op_adc_zpg(),
                 // 0x66 => self.op_ror_zpg(),
                 0x68 => self.op_pla(),
@@ -156,7 +156,7 @@ impl CPU {
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0x8 => match opcode {
-                // 0x81 => self.op_sta_x_ind(),
+                // 0x81 => self.op_sta_ind_x(),
                 // 0x84 => self.op_sty_zpg(),
                 0x85 => self.op_sta_zpg(),
                 0x86 => self.op_stx_zpg(),
@@ -181,7 +181,7 @@ impl CPU {
             },
             0xA => match opcode {
                 0xA0 => self.op_ldy_imm(),
-                // 0xA1 => self.op_lda_x_ind(),
+                0xA1 => self.op_lda_ind_x(),
                 0xA2 => self.op_ldx_imm(),
                 // 0xA4 => self.op_ldy_zpg(),
                 0xA5 => self.op_lda_zpg(),
@@ -210,7 +210,7 @@ impl CPU {
             },
             0xC => match opcode {
                 0xC0 => self.op_cpy_imm(),
-                // 0xC1 => self.op_cmp_x_ind(),
+                // 0xC1 => self.op_cmp_ind_x(),
                 // 0xC4 => self.op_cpy_zpg(),
                 // 0xC5 => self.op_cmp_zpg(),
                 // 0xC6 => self.op_dec_zpg(),
@@ -235,7 +235,7 @@ impl CPU {
             },
             0xE => match opcode {
                 0xE0 => self.op_cpx_imm(),
-                // 0xE1 => self.op_sbc_x_ind(),
+                // 0xE1 => self.op_sbc_ind_x(),
                 // 0xE4 => self.op_cpx_zpg(),
                 // 0xE5 => self.op_sbc_zpg(),
                 // 0xE6 => self.op_inc_zpg(),
@@ -285,7 +285,7 @@ impl CPU {
         self.cycles += 7;
     }
 
-    fn op_ora_x_ind(&mut self) {
+    fn op_ora_ind_x(&mut self) {
         // ORA X, ind - OR Memory With Accumulator
         // A = A OR M                        N Z C I D V
         //                                   + + - - - -
@@ -297,25 +297,25 @@ impl CPU {
         let operator = self.memory_read(self.registers.pc);
         self.registers.pc += 1;
 
-        let address = self.memory_read(operator.wrapping_add(self.registers.x).into());
-
-        let value = self.memory_read(address as u16);
-        self.registers.a |= value;
+        let indirect = operator.wrapping_add(self.registers.x);
+        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
+        let address_lo = self.memory_read(indirect as u16) as u16;
+        let address = (address_hi << 8) | address_lo;
+        let value = self.memory_read(address);
 
         self.trace_opcode(
             2,
             format!("01 {:02X}", operator),
             format!(
                 "ORA (${:02X},X) @ {:02X} = {:04X} = {:02X}",
-                operator,
-                operator.wrapping_add(self.registers.x),
-                address,
-                value,
+                operator, indirect, address, value,
             ),
         );
 
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
+        self.registers.a |= value;
+
+        let n = value & 0x80 != 0;
+        let z = value == 0;
 
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
@@ -576,7 +576,6 @@ impl CPU {
         let address = base.wrapping_add(self.registers.y as u16);
 
         let value = self.memory_read(address);
-        self.registers.a |= value;
 
         self.trace_opcode(
             2,
@@ -586,6 +585,8 @@ impl CPU {
                 operator, base, address, value
             ),
         );
+
+        self.registers.a |= value;
 
         let n = self.registers.a & 0x80 != 0;
         let z = self.registers.a == 0;
@@ -615,13 +616,14 @@ impl CPU {
         let address = address.wrapping_add(self.registers.x);
 
         let value = self.memory_read(address as u16);
-        self.registers.a |= value;
 
         self.trace_opcode(
             2,
             format!("15 {:02X}", address),
             format!("ORA ${:02X},X @ {:02X} = {:02X}", address, address, value),
         );
+
+        self.registers.a |= value;
 
         let n = self.registers.a & 0x80 != 0;
         let z = self.registers.a == 0;
@@ -818,7 +820,7 @@ impl CPU {
         self.cycles += 6;
     }
 
-    fn op_and_x_ind(&mut self) {
+    fn op_and_ind_x(&mut self) {
         // AND - AND Memory With ACC
         // A = A AND M                       N Z C I D V
         //                                   + + - - - -
@@ -830,25 +832,25 @@ impl CPU {
         let operator = self.memory_read(self.registers.pc);
         self.registers.pc += 1;
 
-        let address = self.memory_read_u16(operator.wrapping_add(self.registers.x) as u16);
-
+        let indirect = operator.wrapping_add(self.registers.x);
+        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
+        let address_lo = self.memory_read(indirect as u16) as u16;
+        let address = (address_hi << 8) | address_lo;
         let value = self.memory_read(address);
-        self.registers.a &= value;
 
         self.trace_opcode(
             2,
             format!("21 {:02X}", operator),
             format!(
                 "AND (${:02X},X) @ {:02X} = {:04X} = {:02X}",
-                operator,
-                operator.wrapping_add(self.registers.x),
-                address,
-                value,
+                operator, indirect, address, value,
             ),
         );
 
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
+        self.registers.a &= value;
+
+        let n = value & 0x80 != 0;
+        let z = value == 0;
 
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
@@ -1774,6 +1776,44 @@ impl CPU {
         self.cycles += 2;
     }
 
+    fn op_lda_ind_x(&mut self) {
+        // LDA - Load Accumulator With Memory
+        // A = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // (indirect,X)  LDA (oper,X) A1        2     6*
+
+        let operator = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        let indirect = operator.wrapping_add(self.registers.x);
+        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
+        let address_lo = self.memory_read(indirect as u16) as u16;
+        let address = (address_hi << 8) | address_lo;
+        let value = self.memory_read(address);
+
+        self.trace_opcode(
+            2,
+            format!("A1 {:02X}", operator),
+            format!(
+                "LDA (${:02X},X) @ {:02X} = {:04X} = {:02X}",
+                operator, indirect, address, value
+            ),
+        );
+
+        self.registers.a = value;
+
+        let n = value & 0x80 != 0;
+        let z = value == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 6;
+    }
+
     fn op_ldx_imm(&mut self) {
         // LDX - Load Index X With Memory
         // X = M                             N Z C I D V
@@ -2383,6 +2423,11 @@ impl CPU {
     }
 
     fn memory_write(&mut self, address: u16, value: u8) {
+        match address {
+            0x0000..=0x00FF => trace!("Zeropage write: {:04X} = {:02X}", address, value),
+            _ => {}
+        }
+
         match address {
             0x0000..=0x401F => self.memory.write(address, value),
             0x4020..=0xFFFF => {
