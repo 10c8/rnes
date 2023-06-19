@@ -849,8 +849,8 @@ impl CPU {
 
         self.registers.a &= value;
 
-        let n = value & 0x80 != 0;
-        let z = value == 0;
+        let n = self.registers.a & 0x80 != 0;
+        let z = self.registers.a == 0;
 
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
@@ -902,13 +902,14 @@ impl CPU {
         self.registers.pc += 1;
 
         let value = self.memory_read(address as u16);
-        self.registers.a &= value;
 
         self.trace_opcode(
             2,
             format!("25 {:02X}", address),
             format!("AND ${:02X} = {:02X}", address, value),
         );
+
+        self.registers.a &= value;
 
         let n = self.registers.a & 0x80 != 0;
         let z = self.registers.a == 0;
@@ -1080,13 +1081,14 @@ impl CPU {
         self.registers.pc += 2;
 
         let value = self.memory_read(address);
-        self.registers.a &= value;
 
         self.trace_opcode(
             3,
             format!("2D {:02X}", address),
             format!("AND ${:04X} = {:02X}", address, value),
         );
+
+        self.registers.a &= value;
 
         let n = self.registers.a & 0x80 != 0;
         let z = self.registers.a == 0;
