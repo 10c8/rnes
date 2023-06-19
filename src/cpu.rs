@@ -161,11 +161,10 @@ impl CPU {
                 0x85 => self.op_sta_zpg(),
                 0x86 => self.op_stx_zpg(),
                 0x88 => self.op_dey(),
-                // 0x89 => self.op_txa(),
-                0x8A => self.op_sty_abs(),
-                // 0x8C => self.op_stx_abs(),
+                0x8A => self.op_txa(),
+                0x8C => self.op_sty_abs(),
                 // 0x8D => self.op_sta_abs(),
-                // 0x8E => self.op_sta_abs(),
+                // 0x8E => self.op_stx_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0x9 => match opcode {
@@ -1522,6 +1521,28 @@ impl CPU {
         self.cycles += 2;
     }
 
+    fn op_txa(&mut self) {
+        // TXA - Transfer Index X To ACC
+        // A = X                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // implied       TXA          8A        1      2
+
+        self.trace_opcode(1, "8A", "TXA");
+
+        self.registers.a = self.registers.x;
+
+        let n = self.registers.a & 0x80 != 0;
+        let z = self.registers.a == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 2;
+    }
+
     fn op_sty_abs(&mut self) {
         // STY - Store Index Y In Memory
         // M = Y                             N Z C I D V
@@ -2305,6 +2326,7 @@ impl Memory {
         match address {
             0x0000..=0x1FFF => self.ram[address as usize],
             0x2000..=0x2007 => 0x00, // TODO: I/O registers
+            0x2008..=0x3FFF => self.ram[(address - 0x2000) as usize],
             _ => panic!("Invalid memory read address: 0x{:04X}", address),
         }
     }
