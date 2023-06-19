@@ -1592,13 +1592,13 @@ impl CPU {
         let value = self.memory_read(self.registers.pc);
         self.registers.pc += 1;
 
-        self.registers.x = value;
-
         self.trace_opcode(
             2,
             format!("A2 {:02X}", value),
             format!("LDX #${:02X}", value),
         );
+
+        self.registers.x = value;
 
         let n = self.registers.x & 0x80 != 0;
         let z = self.registers.x == 0;
