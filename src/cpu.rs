@@ -162,7 +162,7 @@ impl CPU {
                 0x86 => self.op_stx_zpg(),
                 0x88 => self.op_dey(),
                 // 0x89 => self.op_txa(),
-                // 0x8A => self.op_sty_abs(),
+                0x8A => self.op_sty_abs(),
                 // 0x8C => self.op_stx_abs(),
                 // 0x8D => self.op_sta_abs(),
                 // 0x8E => self.op_sta_abs(),
@@ -1520,6 +1520,31 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
+    }
+
+    fn op_sty_abs(&mut self) {
+        // STY - Store Index Y In Memory
+        // M = Y                             N Z C I D V
+        //                                   - - - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      STY oper     8C        3      4
+
+        let address = self.memory_read_u16(self.registers.pc);
+        self.registers.pc += 2;
+
+        let initial = self.memory_read(address);
+
+        self.trace_opcode(
+            3,
+            format!("8C {:04X}", address),
+            format!("STY ${:04X} = {:02X}", address, initial),
+        );
+
+        self.memory_write(address, self.registers.y);
+
+        self.cycles += 4;
     }
 
     // Opcodes 90-9F
