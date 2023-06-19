@@ -157,7 +157,7 @@ impl CPU {
             },
             0x8 => match opcode {
                 0x81 => self.op_sta_ind_x(),
-                // 0x84 => self.op_sty_zpg(),
+                0x84 => self.op_sty_zpg(),
                 0x85 => self.op_sta_zpg(),
                 0x86 => self.op_stx_zpg(),
                 0x88 => self.op_dey(),
@@ -1388,6 +1388,28 @@ impl CPU {
         self.memory_write(address, self.registers.a);
 
         self.cycles += 6;
+    }
+
+    fn op_sty_zpg(&mut self) {
+        // STY - Store Index Y In Memory
+        // M = Y                             N Z C I D V
+        //                                   - - - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage      STY oper     84        2      3
+
+        let (address, initial) = self.zeropage();
+
+        self.trace_opcode(
+            2,
+            format!("84 {:02X}", address),
+            format!("STY ${:02X} = {:02X}", address, initial),
+        );
+
+        self.memory_write(address as u16, self.registers.y);
+
+        self.cycles += 3;
     }
 
     fn op_sta_zpg(&mut self) {
