@@ -241,7 +241,7 @@ impl CPU {
                 // 0xE5 => self.op_sbc_zpg(),
                 // 0xE6 => self.op_inc_zpg(),
                 // 0xE8 => self.op_inx(),
-                // 0xE9 => self.op_sbc_imm(),
+                0xE9 => self.op_sbc_imm(),
                 0xEA => self.op_nop(),
                 // 0xEC => self.op_cpx_abs(),
                 // 0xED => self.op_sbc_abs(),
@@ -1866,6 +1866,42 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
         self.registers.set_status_flag(StatusFlag::Carry, c);
+
+        self.cycles += 2;
+    }
+
+    fn op_sbc_imm(&mut self) {
+        // SBC - Subtract Memory From ACC With Borrow
+        // A - M - C                         N Z C I D V
+        //                                   + + + - - +
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // immediate     SBC #oper    E9        2      2
+
+        let value = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        self.trace_opcode(
+            2,
+            format!("E9 {:02X}", value),
+            format!("SBC #${:02X}", value),
+        );
+
+        let a = self.registers.a;
+        let c = self.registers.get_status_flag(StatusFlag::Carry) as u8;
+        let result = a.wrapping_sub(value).wrapping_sub(1 - c);
+        self.registers.a = result;
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+        let c = a >= value;
+        let v = ((a ^ result) & 0x80 != 0) && ((a ^ value) & 0x80 != 0);
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Overflow, v);
 
         self.cycles += 2;
     }
