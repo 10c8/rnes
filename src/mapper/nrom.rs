@@ -1,5 +1,3 @@
-use log::trace;
-
 use crate::cartridge::Cartridge;
 
 use super::Mapper;

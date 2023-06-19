@@ -183,7 +183,7 @@ impl CPU {
                 0xA0 => self.op_ldy_imm(),
                 0xA1 => self.op_lda_ind_x(),
                 0xA2 => self.op_ldx_imm(),
-                // 0xA4 => self.op_ldy_zpg(),
+                0xA4 => self.op_ldy_zpg(),
                 0xA5 => self.op_lda_zpg(),
                 // 0xA6 => self.op_ldx_zpg(),
                 0xA8 => self.op_tay(),
@@ -1679,6 +1679,34 @@ impl CPU {
         self.x_load(value);
 
         self.cycles += 2;
+    }
+
+    fn op_ldy_zpg(&mut self) {
+        // LDY - Load Index Y With Memory
+        // Y = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage      LDY oper     A4        2      3
+
+        let (address, value) = self.zeropage();
+
+        self.trace_opcode(
+            2,
+            format!("A4 {:02X}", address),
+            format!("LDY ${:02X} = {:02X}", address, value),
+        );
+
+        self.registers.y = value;
+
+        let n = self.registers.y & 0x80 != 0;
+        let z = self.registers.y == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 3;
     }
 
     fn op_lda_zpg(&mut self) {
