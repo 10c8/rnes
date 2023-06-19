@@ -1,0 +1,6 @@
+/debugger
+/target
+
+*.log
+*.cdl
+*.deb
