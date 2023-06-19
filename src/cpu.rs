@@ -114,7 +114,7 @@ impl CPU {
                 // 0x46 => self.op_lsr_zpg(),
                 0x48 => self.op_pha(),
                 0x49 => self.op_eor_imm(),
-                // 0x4A => self.op_lsr_acc(),
+                0x4A => self.op_lsr_acc(),
                 0x4C => self.op_jmp_abs(),
                 // 0x4D => self.op_eor_abs(),
                 // 0x4E => self.op_lsr_abs(),
@@ -1251,6 +1251,29 @@ impl CPU {
 
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 2;
+    }
+
+    fn op_lsr_acc(&mut self) {
+        // LSR - Logical Shift Right
+        // A = A >> 1                        N Z C I D V
+        //                                   0 + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // accumulator   LSR A        4A        1      2
+
+        self.trace_opcode(1, "4A", "LSR A");
+
+        let c = self.registers.a & 0x01 != 0;
+        self.registers.a >>= 1;
+
+        let z = self.registers.a == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, false);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.registers.set_status_flag(StatusFlag::Carry, c);
 
         self.cycles += 2;
     }
