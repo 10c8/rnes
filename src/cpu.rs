@@ -163,7 +163,7 @@ impl CPU {
                 0x88 => self.op_dey(),
                 0x8A => self.op_txa(),
                 0x8C => self.op_sty_abs(),
-                // 0x8D => self.op_sta_abs(),
+                0x8D => self.op_sta_abs(),
                 0x8E => self.op_stx_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
@@ -1618,6 +1618,31 @@ impl CPU {
         );
 
         self.memory_write(address, self.registers.y);
+
+        self.cycles += 4;
+    }
+
+    fn op_sta_abs(&mut self) {
+        // STA - Store Accumulator In Memory
+        // M = A                             N Z C I D V
+        //                                   - - - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      STA oper     8D        3      4
+
+        let address = self.memory_read_u16(self.registers.pc);
+        self.registers.pc += 2;
+
+        let initial = self.memory_read(address);
+
+        self.trace_opcode(
+            3,
+            format!("8D {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("STA ${:04X} = {:02X}", address, initial),
+        );
+
+        self.memory_write(address, self.registers.a);
 
         self.cycles += 4;
     }
