@@ -156,7 +156,7 @@ impl CPU {
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0x8 => match opcode {
-                // 0x81 => self.op_sta_ind_x(),
+                0x81 => self.op_sta_ind_x(),
                 // 0x84 => self.op_sty_zpg(),
                 0x85 => self.op_sta_zpg(),
                 0x86 => self.op_stx_zpg(),
@@ -1505,6 +1505,38 @@ impl CPU {
     }
 
     // Opcodes 80-8F
+    fn op_sta_ind_x(&mut self) {
+        // STA - Store Accumulator In Memory
+        // M = A                             N Z C I D V
+        //                                   - - - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // (indirect,X)  STA (oper,X) 81        2      6
+
+        let operator = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        let indirect = operator.wrapping_add(self.registers.x);
+        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
+        let address_lo = self.memory_read(indirect as u16) as u16;
+        let address = (address_hi << 8) | address_lo;
+        let value = self.memory_read(address);
+
+        self.trace_opcode(
+            2,
+            format!("81 {:02X}", operator),
+            format!(
+                "STA (${:02X},X) @ {:02X} = {:04X} = {:02X}",
+                operator, indirect, address, value
+            ),
+        );
+
+        self.memory_write(address, self.registers.a);
+
+        self.cycles += 6;
+    }
+
     fn op_sta_zpg(&mut self) {
         // STA - Store Accumulator In Memory
         // M = A                             N Z C I D V
@@ -1954,12 +1986,13 @@ impl CPU {
         //
         // addressing    assembler    op    bytes cycles
         // ---------------------------------------------
-        // absolute      LDA $imm     AD        3     4*
+        // absolute      LDA $imm     AD        3      4
 
         let address = self.memory_read_u16(self.registers.pc);
         self.registers.pc += 2;
 
         let value = self.memory_read(address);
+
         self.trace_opcode(
             3,
             format!("AD {:02X} {:02X}", address & 0xFF, address >> 8),
@@ -1973,10 +2006,6 @@ impl CPU {
 
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
-
-        if address & 0xFF00 != (address + 1) & 0xFF00 {
-            self.cycles += 1;
-        }
 
         self.cycles += 4;
     }
