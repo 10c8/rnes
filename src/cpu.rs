@@ -133,7 +133,7 @@ impl CPU {
             },
             0x6 => match opcode {
                 0x60 => self.op_rts(),
-                // 0x61 => self.op_adc_ind_x(),
+                0x61 => self.op_adc_ind_x(),
                 // 0x65 => self.op_adc_zpg(),
                 // 0x66 => self.op_ror_zpg(),
                 0x68 => self.op_pla(),
@@ -301,6 +301,7 @@ impl CPU {
         let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
         let address_lo = self.memory_read(indirect as u16) as u16;
         let address = (address_hi << 8) | address_lo;
+
         let value = self.memory_read(address);
 
         self.trace_opcode(
@@ -312,13 +313,7 @@ impl CPU {
             ),
         );
 
-        self.registers.a |= value;
-
-        let n = value & 0x80 != 0;
-        let z = value == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_or(value);
 
         self.cycles += 6;
     }
@@ -335,20 +330,15 @@ impl CPU {
         let address = self.memory_read(self.registers.pc);
         self.registers.pc += 1;
 
+        let value = self.memory_read(address as u16);
+
         self.trace_opcode(
             2,
             format!("05 {:02X}", address),
             format!("ORA ${:02X}", address),
         );
 
-        let value = self.memory_read(address as u16);
-        self.registers.a |= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_or(value);
 
         self.cycles += 3;
     }
@@ -422,13 +412,7 @@ impl CPU {
             format!("ORA #${:02X}", value),
         );
 
-        self.registers.a |= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_or(value);
 
         self.cycles += 2;
     }
@@ -471,7 +455,6 @@ impl CPU {
         self.registers.pc += 2;
 
         let value = self.memory_read(address);
-        self.registers.a |= value;
 
         self.trace_opcode(
             3,
@@ -479,11 +462,7 @@ impl CPU {
             format!("ORA ${:04X} = {:02X}", address, value),
         );
 
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_or(value);
 
         self.cycles += 4;
     }
@@ -586,13 +565,7 @@ impl CPU {
             ),
         );
 
-        self.registers.a |= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_or(value);
 
         if address & 0xFF00 != base & 0xFF00 {
             self.cycles += 1;
@@ -623,13 +596,7 @@ impl CPU {
             format!("ORA ${:02X},X @ {:02X} = {:02X}", address, address, value),
         );
 
-        self.registers.a |= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_or(value);
 
         self.cycles += 4;
     }
@@ -701,7 +668,6 @@ impl CPU {
         let address = operator.wrapping_add(self.registers.y as u16);
 
         let value = self.memory_read(address);
-        self.registers.a |= value;
 
         self.trace_opcode(
             3,
@@ -709,11 +675,7 @@ impl CPU {
             format!("ORA ${:04X},Y @ {:04X} = {:02X}", operator, address, value),
         );
 
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_or(value);
 
         if address & 0xFF00 != address & 0xFF00 {
             self.cycles += 1;
@@ -737,7 +699,6 @@ impl CPU {
         let address = operator.wrapping_add(self.registers.x as u16);
 
         let value = self.memory_read(address);
-        self.registers.a |= value;
 
         self.trace_opcode(
             3,
@@ -745,11 +706,7 @@ impl CPU {
             format!("ORA ${:04X},X @ {:04X} = {:02X}", operator, address, value),
         );
 
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_or(value);
 
         if address & 0xFF00 != address & 0xFF00 {
             self.cycles += 1;
@@ -836,6 +793,7 @@ impl CPU {
         let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
         let address_lo = self.memory_read(indirect as u16) as u16;
         let address = (address_hi << 8) | address_lo;
+
         let value = self.memory_read(address);
 
         self.trace_opcode(
@@ -1230,6 +1188,7 @@ impl CPU {
         let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
         let address_lo = self.memory_read(indirect as u16) as u16;
         let address = (address_hi << 8) | address_lo;
+
         let value = self.memory_read(address);
 
         self.trace_opcode(
@@ -1241,13 +1200,7 @@ impl CPU {
             ),
         );
 
-        self.registers.a ^= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_xor(value);
 
         self.cycles += 6;
     }
@@ -1286,13 +1239,7 @@ impl CPU {
             format!("EOR #${:02X}", value),
         );
 
-        self.registers.a ^= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_xor(value);
 
         self.cycles += 2;
     }
@@ -1309,6 +1256,7 @@ impl CPU {
         self.trace_opcode(1, "4A", "LSR A");
 
         let c = self.registers.a & 0x01 != 0;
+
         self.registers.a >>= 1;
 
         let z = self.registers.a == 0;
@@ -1398,6 +1346,39 @@ impl CPU {
         self.cycles += 6;
     }
 
+    fn op_adc_ind_x(&mut self) {
+        // ADC - Add Memory To ACC With Carry
+        // A = A + M + C                     N Z C I D V
+        //                                   + + + - - +
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // (indirect,X)  ADC (oper,X) 61        2     6*
+
+        let operator = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        let indirect = operator.wrapping_add(self.registers.x);
+        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
+        let address_lo = self.memory_read(indirect as u16) as u16;
+        let address = (address_hi << 8) | address_lo;
+
+        let value = self.memory_read(address);
+
+        self.trace_opcode(
+            2,
+            format!("61 {:02X}", operator),
+            format!(
+                "ADC (${:02X},X) @ {:02X} = {:04X} = {:02X}",
+                operator, indirect, address, value
+            ),
+        );
+
+        self.acc_add(value);
+
+        self.cycles += 6;
+    }
+
     fn op_pla(&mut self) {
         // PLA - Pull Accumulator From Stack
         // pop A                             N Z C I D V
@@ -1439,23 +1420,7 @@ impl CPU {
             format!("ADC #${:02X}", value),
         );
 
-        let a = self.registers.a;
-        let c = self.registers.get_status_flag(StatusFlag::Carry);
-
-        let carry = if c { 1 } else { 0 };
-        let result = a.wrapping_add(value).wrapping_add(carry);
-
-        self.registers.a = result;
-
-        let n = result & 0x80 != 0;
-        let z = result == 0;
-        let c = result < a || result < value || result < carry;
-        let v = (a ^ result) & (value ^ result) & 0x80 != 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Overflow, v);
+        self.acc_add(value);
 
         self.cycles += 2;
     }
@@ -1561,6 +1526,7 @@ impl CPU {
         let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
         let address_lo = self.memory_read(indirect as u16) as u16;
         let address = (address_hi << 8) | address_lo;
+
         let value = self.memory_read(address);
 
         self.trace_opcode(
@@ -1864,6 +1830,7 @@ impl CPU {
         let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
         let address_lo = self.memory_read(indirect as u16) as u16;
         let address = (address_hi << 8) | address_lo;
+
         let value = self.memory_read(address);
 
         self.trace_opcode(
@@ -1875,13 +1842,7 @@ impl CPU {
             ),
         );
 
-        self.registers.a = value;
-
-        let n = value & 0x80 != 0;
-        let z = value == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_load(value);
 
         self.cycles += 6;
     }
@@ -1904,13 +1865,7 @@ impl CPU {
             format!("LDX #${:02X}", value),
         );
 
-        self.registers.x = value;
-
-        let n = self.registers.x & 0x80 != 0;
-        let z = self.registers.x == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.x_load(value);
 
         self.cycles += 2;
     }
@@ -1927,21 +1882,15 @@ impl CPU {
         let address = self.memory_read(self.registers.pc);
         self.registers.pc += 1;
 
-        let initial = self.memory_read(address as u16);
+        let value = self.memory_read(address as u16);
 
         self.trace_opcode(
             2,
             format!("A5 {:02X}", address),
-            format!("LDA ${:02X} = {:02X}", address, initial),
+            format!("LDA ${:02X} = {:02X}", address, value),
         );
 
-        self.registers.a = initial;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_load(value);
 
         self.cycles += 3;
     }
@@ -1986,13 +1935,7 @@ impl CPU {
             format!("LDA #${:02X}", value),
         );
 
-        self.registers.a = value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_load(value);
 
         self.cycles += 2;
     }
@@ -2039,13 +1982,7 @@ impl CPU {
             format!("LDA ${:04X} = {:02X}", address, value),
         );
 
-        self.registers.a = value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_load(value);
 
         self.cycles += 4;
     }
@@ -2070,13 +2007,7 @@ impl CPU {
             format!("LDX ${:04X} = {:02X}", address, value),
         );
 
-        self.registers.x = value;
-
-        let n = self.registers.x & 0x80 != 0;
-        let z = self.registers.x == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.x_load(value);
 
         if address & 0xFF00 != (address - 1) & 0xFF00 {
             self.cycles += 1;
@@ -2469,6 +2400,65 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Decimal, true);
 
         self.cycles += 2;
+    }
+
+    // Operations
+    fn acc_load(&mut self, value: u8) {
+        self.registers.a = value;
+
+        let n = self.registers.a & 0x80 != 0;
+        let z = self.registers.a == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+    }
+
+    fn acc_add(&mut self, value: u8) {
+        let a = self.registers.a;
+        let carry = self.registers.get_status_flag(StatusFlag::Carry) as u8;
+        let result = a.wrapping_add(value).wrapping_add(carry);
+
+        self.registers.a = result;
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+        let c = result < a;
+        let v = (a ^ result) & ((value ^ result) & 0x80) != 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Overflow, v);
+    }
+
+    fn acc_or(&mut self, value: u8) {
+        self.registers.a |= value;
+
+        let n = self.registers.a & 0x80 != 0;
+        let z = self.registers.a == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+    }
+
+    fn acc_xor(&mut self, value: u8) {
+        self.registers.a ^= value;
+
+        let n = self.registers.a & 0x80 != 0;
+        let z = self.registers.a == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+    }
+
+    fn x_load(&mut self, value: u8) {
+        self.registers.x = value;
+
+        let n = self.registers.x & 0x80 != 0;
+        let z = self.registers.x == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
     }
 
     // Memory
