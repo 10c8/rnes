@@ -217,7 +217,7 @@ impl CPU {
                 // 0xC6 => self.op_dec_zpg(),
                 0xC8 => self.op_iny(),
                 0xC9 => self.op_cmp_imm(),
-                // 0xCA => self.op_dex(),
+                0xCA => self.op_dex(),
                 // 0xCC => self.op_cpy_abs(),
                 // 0xCD => self.op_cmp_abs(),
                 // 0xCE => self.op_dec_abs(),
@@ -1827,6 +1827,28 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
         self.registers.set_status_flag(StatusFlag::Carry, c);
+
+        self.cycles += 2;
+    }
+
+    fn op_dex(&mut self) {
+        // DEX - Decrement Index X By One
+        // X = X - 1                         N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // implied       DEX          CA        1      2
+
+        self.trace_opcode(1, "CA", "DEX");
+
+        self.registers.x = self.registers.x.wrapping_sub(1);
+
+        let n = self.registers.x & 0x80 != 0;
+        let z = self.registers.x == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
