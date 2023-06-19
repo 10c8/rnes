@@ -160,7 +160,7 @@ impl CPU {
                 // 0x84 => self.op_sty_zpg(),
                 0x85 => self.op_sta_zpg(),
                 0x86 => self.op_stx_zpg(),
-                // 0x88 => self.op_dey(),
+                0x88 => self.op_dey(),
                 // 0x89 => self.op_txa(),
                 // 0x8A => self.op_sty_abs(),
                 // 0x8C => self.op_stx_abs(),
@@ -1498,6 +1498,28 @@ impl CPU {
         self.memory_write(address as u16, self.registers.x);
 
         self.cycles += 3;
+    }
+
+    fn op_dey(&mut self) {
+        // DEY - Decrement Index Y By One
+        // Y = Y - 1                         N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // implied       DEY          88        1      2
+
+        self.trace_opcode(1, "88", "DEY");
+
+        self.registers.y = self.registers.y.wrapping_sub(1);
+
+        let n = self.registers.y & 0x80 != 0;
+        let z = self.registers.y == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 2;
     }
 
     // Opcodes 90-9F
