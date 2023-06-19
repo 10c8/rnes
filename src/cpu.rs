@@ -235,7 +235,7 @@ impl CPU {
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0xE => match opcode {
-                // 0xE0 => self.op_cpx_imm(),
+                0xE0 => self.op_cpx_imm(),
                 // 0xE1 => self.op_sbc_x_ind(),
                 // 0xE4 => self.op_cpx_zpg(),
                 // 0xE5 => self.op_sbc_zpg(),
@@ -1838,6 +1838,38 @@ impl CPU {
     }
 
     // Opcodes E0-EF
+    fn op_cpx_imm(&mut self) {
+        // CPX - Compare Memory And Index X
+        // X - M                             N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // immediate     CPX #oper    E0        2      2
+
+        let value = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        self.trace_opcode(
+            2,
+            format!("E0 {:02X}", value),
+            format!("CPX #${:02X}", value),
+        );
+
+        let x = self.registers.x;
+        let result = x.wrapping_sub(value);
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+        let c = x >= value;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+
+        self.cycles += 2;
+    }
+
     fn op_nop(&mut self) {
         // NOP - No Operation
         //                                   N Z C I D V
