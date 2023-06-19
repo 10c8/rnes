@@ -202,7 +202,7 @@ impl CPU {
                 // 0xB6 => self.op_ldx_zpg_y(),
                 0xB8 => self.op_clv(),
                 // 0xB9 => self.op_lda_abs_y(),
-                // 0xBA => self.op_tsx(),
+                0xBA => self.op_tsx(),
                 // 0xBC => self.op_ldy_abs_x(),
                 // 0xBD => self.op_lda_abs_x(),
                 // 0xBE => self.op_ldx_abs_y(),
@@ -1625,7 +1625,7 @@ impl CPU {
     }
 
     fn op_txs(&mut self) {
-        // TXS - Transfer Index X To Stack Pointer
+        // TXS - Transfer Index X To SP
         // SP = X                            N Z C I D V
         //                                   - - - - - -
         //
@@ -1852,6 +1852,28 @@ impl CPU {
         self.trace_opcode(1, "B8", "CLV");
 
         self.registers.set_status_flag(StatusFlag::Overflow, false);
+
+        self.cycles += 2;
+    }
+
+    fn op_tsx(&mut self) {
+        // TSX - Transfer SP To Index X
+        // X = S                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // implied       TSX          BA        1      2
+
+        self.trace_opcode(1, "BA", "TSX");
+
+        self.registers.x = self.registers.sp;
+
+        let n = self.registers.x & 0x80 != 0;
+        let z = self.registers.x == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
