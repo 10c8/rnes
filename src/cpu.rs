@@ -181,7 +181,7 @@ impl CPU {
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0xA => match opcode {
-                // 0xA0 => self.op_ldy_imm(),
+                0xA0 => self.op_ldy_imm(),
                 // 0xA1 => self.op_lda_x_ind(),
                 0xA2 => self.op_ldx_imm(),
                 // 0xA4 => self.op_ldy_zpg(),
@@ -1551,6 +1551,35 @@ impl CPU {
     }
 
     // Opcodes A0-AF
+    fn op_ldy_imm(&mut self) {
+        // LDY - Load Index Y With Memory
+        // Y = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // immediate     LDY #oper    A0        2      2
+
+        let value = self.memory_read(self.registers.pc);
+        self.registers.pc += 1;
+
+        self.trace_opcode(
+            2,
+            format!("A0 {:02X}", value),
+            format!("LDY #${:02X}", value),
+        );
+
+        self.registers.y = value;
+
+        let n = self.registers.y & 0x80 != 0;
+        let z = self.registers.y == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 2;
+    }
+
     fn op_ldx_imm(&mut self) {
         // LDX - Load Index X With Memory
         // X = M                             N Z C I D V
