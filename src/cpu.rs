@@ -215,7 +215,7 @@ impl CPU {
                 // 0xC4 => self.op_cpy_zpg(),
                 // 0xC5 => self.op_cmp_zpg(),
                 // 0xC6 => self.op_dec_zpg(),
-                // 0xC8 => self.op_iny(),
+                0xC8 => self.op_iny(),
                 0xC9 => self.op_cmp_imm(),
                 // 0xCA => self.op_dex(),
                 // 0xCC => self.op_cpy_abs(),
@@ -1751,6 +1751,28 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
         self.registers.set_status_flag(StatusFlag::Carry, c);
+
+        self.cycles += 2;
+    }
+
+    fn op_iny(&mut self) {
+        // INY - Increment Index Y By One
+        // Y = Y + 1                         N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // implied       INY          C8        1      2
+
+        self.trace_opcode(1, "C8", "INY");
+
+        self.registers.y = self.registers.y.wrapping_add(1);
+
+        let n = self.registers.y & 0x80 != 0;
+        let z = self.registers.y == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
