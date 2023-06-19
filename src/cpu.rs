@@ -191,7 +191,7 @@ impl CPU {
                 0xAA => self.op_tax(),
                 // 0xAC => self.op_ldy_abs(),
                 0xAD => self.op_lda_abs(),
-                // 0xAE => self.op_ldx_abs(),
+                0xAE => self.op_ldx_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0xB => match opcode {
@@ -548,13 +548,13 @@ impl CPU {
         );
 
         if !self.registers.get_status_flag(StatusFlag::Negative) {
-            self.registers.pc = address;
-
             self.cycles += 1;
 
-            if self.registers.pc & 0xFF00 != (self.registers.pc + 1) & 0xFF00 {
+            if self.registers.pc & 0xFF00 != address & 0xFF00 {
                 self.cycles += 1;
             }
+
+            self.registers.pc = address;
         }
 
         self.cycles += 2;
@@ -1159,15 +1159,16 @@ impl CPU {
         );
 
         if self.registers.get_status_flag(StatusFlag::Negative) {
+            self.cycles += 1;
+
+            if self.registers.pc & 0xFF00 != address & 0xFF00 {
+                self.cycles += 1;
+            }
+
             self.registers.pc = address;
-            self.cycles += 3;
-        } else {
-            self.cycles += 2;
         }
 
-        if self.registers.pc & 0xFF00 != address & 0xFF00 {
-            self.cycles += 1;
-        }
+        self.cycles += 2;
     }
 
     fn op_sec(&mut self) {
@@ -1302,13 +1303,13 @@ impl CPU {
         );
 
         if !self.registers.get_status_flag(StatusFlag::Overflow) {
-            self.registers.pc = address;
-
             self.cycles += 1;
 
-            if self.registers.pc & 0xFF00 != (self.registers.pc + 1) & 0xFF00 {
+            if self.registers.pc & 0xFF00 != address & 0xFF00 {
                 self.cycles += 1;
             }
+
+            self.registers.pc = address;
         }
 
         self.cycles += 2;
@@ -1420,13 +1421,13 @@ impl CPU {
         );
 
         if self.registers.get_status_flag(StatusFlag::Overflow) {
-            self.registers.pc = address;
-
             self.cycles += 1;
 
-            if self.registers.pc & 0xFF00 != (self.registers.pc + 1) & 0xFF00 {
+            if self.registers.pc & 0xFF00 != address & 0xFF00 {
                 self.cycles += 1;
             }
+
+            self.registers.pc = address;
         }
 
         self.cycles += 2;
@@ -1810,13 +1811,13 @@ impl CPU {
         self.registers.pc += 2;
 
         let value = self.memory_read(address);
-        self.registers.a = value;
-
         self.trace_opcode(
             3,
-            format!("AD {:02X}", address),
+            format!("AD {:02X} {:02X}", address & 0xFF, address >> 8),
             format!("LDA ${:04X} = {:02X}", address, value),
         );
+
+        self.registers.a = value;
 
         let n = self.registers.a & 0x80 != 0;
         let z = self.registers.a == 0;
@@ -1825,6 +1826,41 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Zero, z);
 
         if address & 0xFF00 != (address + 1) & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 4;
+    }
+
+    fn op_ldx_abs(&mut self) {
+        // LDX - Load Index X With Memory
+        // X = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      LDX $imm     AE        3     4*
+
+        let address = self.memory_read_u16(self.registers.pc);
+        self.registers.pc += 2;
+
+        let value = self.memory_read(address);
+
+        self.trace_opcode(
+            3,
+            format!("AE {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("LDX ${:04X} = {:02X}", address, value),
+        );
+
+        self.registers.x = value;
+
+        let n = self.registers.x & 0x80 != 0;
+        let z = self.registers.x == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        if address & 0xFF00 != (address - 1) & 0xFF00 {
             self.cycles += 1;
         }
 
@@ -1853,13 +1889,13 @@ impl CPU {
         );
 
         if self.registers.get_status_flag(StatusFlag::Carry) {
-            self.registers.pc = address;
-
             self.cycles += 1;
 
-            if self.registers.pc & 0xFF00 != (self.registers.pc + 1) & 0xFF00 {
+            if self.registers.pc & 0xFF00 != address & 0xFF00 {
                 self.cycles += 1;
             }
+
+            self.registers.pc = address;
         }
 
         self.cycles += 2;
@@ -2034,13 +2070,13 @@ impl CPU {
         );
 
         if !self.registers.get_status_flag(StatusFlag::Zero) {
-            self.registers.pc = address;
-
             self.cycles += 1;
 
-            if self.registers.pc & 0xFF00 != (self.registers.pc + 1) & 0xFF00 {
+            if self.registers.pc & 0xFF00 != address & 0xFF00 {
                 self.cycles += 1;
             }
+
+            self.registers.pc = address;
         }
 
         self.cycles += 2;
@@ -2189,13 +2225,13 @@ impl CPU {
         );
 
         if self.registers.get_status_flag(StatusFlag::Zero) {
-            self.registers.pc = address;
-
             self.cycles += 1;
 
-            if self.registers.pc & 0xFF00 != (self.registers.pc + 1) & 0xFF00 {
+            if self.registers.pc & 0xFF00 != address & 0xFF00 {
                 self.cycles += 1;
             }
+
+            self.registers.pc = address;
         }
 
         self.cycles += 2;
@@ -2243,6 +2279,8 @@ impl CPU {
             0x4020..=0xFFFF => {
                 if let Some(mapper) = self.mapper.as_mut() {
                     mapper.write(address, value);
+                } else {
+                    panic!("No mapper found!");
                 }
             }
         }
@@ -2250,11 +2288,7 @@ impl CPU {
 
     fn stack_pop(&mut self) -> u8 {
         self.registers.sp = self.registers.sp.wrapping_add(1);
-
-        let value = self.memory_read(0x0100 + self.registers.sp as u16);
-        self.memory_write(0x0100 + self.registers.sp as u16, 0x00);
-
-        value
+        self.memory_read(0x0100 + self.registers.sp as u16)
     }
 
     fn stack_pop_u16(&mut self) -> u16 {
@@ -2269,9 +2303,9 @@ impl CPU {
     }
 
     fn stack_push_u16(&mut self, value: u16) {
-        let lo = value as u8;
         let hi = (value >> 8) as u8;
         self.stack_push(hi);
+        let lo = value as u8;
         self.stack_push(lo);
     }
 
@@ -2280,7 +2314,7 @@ impl CPU {
         let disasm = disasm.into();
 
         let line = format!(
-            "{:04X}  {}{}{}{}A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} CYC:{}  <-[{:02X}, {:02X}]",
+            "{:04X}  {}{}{}{}A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} CYC:{}",
             self.registers.pc - pc_offset,
             opcode,
             " ".repeat(10 - opcode.len()),
@@ -2292,12 +2326,10 @@ impl CPU {
             self.registers.p,
             self.registers.sp,
             self.cycles,
-            self.memory_read(0x0100 + self.registers.sp as u16 + 1),
-            self.memory_read(0x0100 + self.registers.sp as u16 + 2),
         );
 
         trace!("{}", line);
-        self.trace_log.write_all(&line.as_bytes()[..73]).unwrap();
+        self.trace_log.write_all(line.as_bytes()).unwrap();
         self.trace_log.write_all(b"\n").unwrap();
     }
 }
