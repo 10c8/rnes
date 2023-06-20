@@ -218,7 +218,7 @@ impl CPU {
                 0xC9 => self.op_cmp_imm(),
                 0xCA => self.op_dex(),
                 // 0xCC => self.op_cpy_abs(),
-                // 0xCD => self.op_cmp_abs(),
+                0xCD => self.op_cmp_abs(),
                 // 0xCE => self.op_dec_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
@@ -2367,6 +2367,28 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
+    }
+
+    fn op_cmp_abs(&mut self) {
+        // CMP - Compare Memory With ACC
+        // A - M                             N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      CMP oper     CD        3      4
+
+        let (address, value) = self.absolute();
+
+        self.trace_opcode(
+            3,
+            format!("CD {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("CMP ${:04X} = {:02X}", address, value),
+        );
+
+        self.acc_compare(value);
+
+        self.cycles += 4;
     }
 
     // Opcodes D0-DF
