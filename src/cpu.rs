@@ -243,7 +243,7 @@ impl CPU {
                 0xE9 => self.op_sbc_imm(),
                 0xEA => self.op_nop(),
                 // 0xEC => self.op_cpx_abs(),
-                // 0xED => self.op_sbc_abs(),
+                0xED => self.op_sbc_abs(),
                 // 0xEE => self.op_inc_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
@@ -2621,6 +2621,28 @@ impl CPU {
         self.trace_opcode(1, "EA", "NOP");
 
         self.cycles += 2;
+    }
+
+    fn op_sbc_abs(&mut self) {
+        // SBC - Subtract Memory From ACC With Borrow
+        // A - M - C                         N Z C I D V
+        //                                   + + + - - +
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      SBC oper     ED        3      4
+
+        let (address, value) = self.absolute();
+
+        self.trace_opcode(
+            3,
+            format!("ED {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("SBC ${:04X} = {:02X}", address, value),
+        );
+
+        self.acc_subtract(value);
+
+        self.cycles += 4;
     }
 
     // Opcodes F0-FF
