@@ -211,7 +211,7 @@ impl CPU {
             0xC => match opcode {
                 0xC0 => self.op_cpy_imm(),
                 0xC1 => self.op_cmp_ind_x(),
-                // 0xC4 => self.op_cpy_zpg(),
+                0xC4 => self.op_cpy_zpg(),
                 0xC5 => self.op_cmp_zpg(),
                 // 0xC6 => self.op_dec_zpg(),
                 0xC8 => self.op_iny(),
@@ -346,7 +346,7 @@ impl CPU {
         self.trace_opcode(
             2,
             format!("06 {:02X}", address),
-            format!("ASL ${:02X}", address),
+            format!("ASL ${:02X} = {:02X}", address, value),
         );
 
         let c = value & 0x80 != 0;
@@ -1133,15 +1133,15 @@ impl CPU {
 
         let (address, mut value) = self.zeropage();
 
-        let c = value & 0x01 != 0;
-
-        value >>= 1;
-
         self.trace_opcode(
             2,
             format!("46 {:02X}", address),
             format!("LSR ${:02X} = {:02X}", address, value),
         );
+
+        let c = value & 0x01 != 0;
+
+        value >>= 1;
 
         self.memory_write(address, value);
 
@@ -1272,15 +1272,15 @@ impl CPU {
 
         let (address, mut value) = self.absolute();
 
-        let c = value & 0x01 != 0;
-
-        value >>= 1;
-
         self.trace_opcode(
             3,
             format!("4E {:02X} {:02X}", address & 0xFF, address >> 8),
             format!("LSR ${:04X} = {:02X}", address, value),
         );
+
+        let c = value & 0x01 != 0;
+
+        value >>= 1;
 
         self.memory_write(address, value);
 
@@ -2137,6 +2137,28 @@ impl CPU {
         self.acc_compare(value);
 
         self.cycles += 6;
+    }
+
+    fn op_cpy_zpg(&mut self) {
+        // CPY - Compare Memory And Index Y
+        // Y - M                             N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage      CPY oper     C4        2      3
+
+        let (address, value) = self.zeropage();
+
+        self.trace_opcode(
+            2,
+            format!("C4 {:02X}", address),
+            format!("CPY ${:02X} = {:02X}", address, value),
+        );
+
+        self.index_compare(self.registers.y, value);
+
+        self.cycles += 3;
     }
 
     fn op_cmp_zpg(&mut self) {
