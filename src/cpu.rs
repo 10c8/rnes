@@ -189,7 +189,7 @@ impl CPU {
                 0xA8 => self.op_tay(),
                 0xA9 => self.op_lda_imm(),
                 0xAA => self.op_tax(),
-                // 0xAC => self.op_ldy_abs(),
+                0xAC => self.op_ldy_abs(),
                 0xAD => self.op_lda_abs(),
                 0xAE => self.op_ldx_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -933,7 +933,7 @@ impl CPU {
 
         self.trace_opcode(
             3,
-            format!("2C {:02X}", address),
+            format!("2C {:02X} {:02X}", address & 0xFF, address >> 8),
             format!("BIT ${:04X} = {:02X}", address, value),
         );
 
@@ -961,7 +961,7 @@ impl CPU {
 
         self.trace_opcode(
             3,
-            format!("2D {:02X}", address),
+            format!("2D {:02X} {:02X}", address & 0xFF, address >> 8),
             format!("AND ${:04X} = {:02X}", address, value),
         );
 
@@ -1682,7 +1682,7 @@ impl CPU {
 
         self.trace_opcode(
             3,
-            format!("8C {:04X}", address),
+            format!("8C {:02X} {:02X}", address & 0xFF, address >> 8),
             format!("STY ${:04X} = {:02X}", address, initial),
         );
 
@@ -2008,6 +2008,28 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
+    }
+
+    fn op_ldy_abs(&mut self) {
+        // LDY - Load Index Y With Memory
+        // Y = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      LDY oper     AC        3      4
+
+        let (address, value) = self.absolute();
+
+        self.trace_opcode(
+            3,
+            format!("AC {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("LDY ${:04X} = {:02X}", address, value),
+        );
+
+        self.y_load(value);
+
+        self.cycles += 4;
     }
 
     fn op_lda_abs(&mut self) {
@@ -2779,6 +2801,16 @@ impl CPU {
 
     fn x_load(&mut self, value: u8) {
         self.registers.x = value;
+
+        let n = value & 0x80 != 0;
+        let z = value == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+    }
+
+    fn y_load(&mut self, value: u8) {
+        self.registers.y = value;
 
         let n = value & 0x80 != 0;
         let z = value == 0;
