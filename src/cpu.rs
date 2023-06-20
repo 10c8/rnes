@@ -212,7 +212,7 @@ impl CPU {
                 0xC0 => self.op_cpy_imm(),
                 0xC1 => self.op_cmp_ind_x(),
                 // 0xC4 => self.op_cpy_zpg(),
-                // 0xC5 => self.op_cmp_zpg(),
+                0xC5 => self.op_cmp_zpg(),
                 // 0xC6 => self.op_dec_zpg(),
                 0xC8 => self.op_iny(),
                 0xC9 => self.op_cmp_imm(),
@@ -2137,6 +2137,28 @@ impl CPU {
         self.acc_compare(value);
 
         self.cycles += 6;
+    }
+
+    fn op_cmp_zpg(&mut self) {
+        // CMP - Compare Memory With ACC
+        // A = A - M                         N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage      CMP oper     C5        2      3
+
+        let (address, value) = self.zeropage();
+
+        self.trace_opcode(
+            2,
+            format!("C5 {:02X}", address),
+            format!("CMP ${:02X} = {:02X}", address, value),
+        );
+
+        self.acc_compare(value);
+
+        self.cycles += 3;
     }
 
     fn op_iny(&mut self) {
