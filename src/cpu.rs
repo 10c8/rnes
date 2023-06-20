@@ -242,7 +242,7 @@ impl CPU {
                 0xE8 => self.op_inx(),
                 0xE9 => self.op_sbc_imm(),
                 0xEA => self.op_nop(),
-                // 0xEC => self.op_cpx_abs(),
+                0xEC => self.op_cpx_abs(),
                 0xED => self.op_sbc_abs(),
                 // 0xEE => self.op_inc_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -2621,6 +2621,28 @@ impl CPU {
         self.trace_opcode(1, "EA", "NOP");
 
         self.cycles += 2;
+    }
+
+    fn op_cpx_abs(&mut self) {
+        // CPX - Compare Memory And Index X
+        // X - M                             N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      CPX oper     EC        3      4
+
+        let (address, value) = self.absolute();
+
+        self.trace_opcode(
+            3,
+            format!("EC {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("CPX ${:04X} = {:02X}", address, value),
+        );
+
+        self.index_compare(self.registers.x, value);
+
+        self.cycles += 4;
     }
 
     fn op_sbc_abs(&mut self) {
