@@ -110,14 +110,14 @@ impl CPU {
             0x4 => match opcode {
                 0x40 => self.op_rti(),
                 0x41 => self.op_eor_ind_x(),
-                // 0x45 => self.op_eor_zpg(),
-                // 0x46 => self.op_lsr_zpg(),
+                0x45 => self.op_eor_zpg(),
+                0x46 => self.op_lsr_zpg(),
                 0x48 => self.op_pha(),
                 0x49 => self.op_eor_imm(),
                 0x4A => self.op_lsr_acc(),
                 0x4C => self.op_jmp_abs(),
-                // 0x4D => self.op_eor_abs(),
-                // 0x4E => self.op_lsr_abs(),
+                0x4D => self.op_eor_abs(),
+                0x4E => self.op_lsr_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0x5 => match opcode {
@@ -134,7 +134,7 @@ impl CPU {
             0x6 => match opcode {
                 0x60 => self.op_rts(),
                 0x61 => self.op_adc_ind_x(),
-                // 0x65 => self.op_adc_zpg(),
+                0x65 => self.op_adc_zpg(),
                 // 0x66 => self.op_ror_zpg(),
                 0x68 => self.op_pla(),
                 0x69 => self.op_adc_imm(),
@@ -1100,6 +1100,61 @@ impl CPU {
         self.cycles += 6;
     }
 
+    fn op_eor_zpg(&mut self) {
+        // EOR - Exclusive OR
+        // A = A XOR M                       N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler     op   bytes cycles
+        // ---------------------------------------------
+        // zeropage      EOR oper      45       2      3
+
+        let (address, value) = self.zeropage();
+
+        self.trace_opcode(
+            2,
+            format!("45 {:02X}", address),
+            format!("EOR ${:02X} = {:02X}", address, value),
+        );
+
+        self.acc_xor(value);
+
+        self.cycles += 3;
+    }
+
+    fn op_lsr_zpg(&mut self) {
+        // LSR - Logical Shift Right
+        // 0 -> [76543210] -> C              N Z C I D V
+        //                                   0 + + - - -
+        //
+        // addressing    assembler     op   bytes cycles
+        // ---------------------------------------------
+        // zeropage      LSR oper      46       2      5
+
+        let (address, mut value) = self.zeropage();
+
+        let c = value & 0x01 != 0;
+
+        value >>= 1;
+
+        self.trace_opcode(
+            2,
+            format!("46 {:02X}", address),
+            format!("LSR ${:02X} = {:02X}", address, value),
+        );
+
+        self.memory_write(address, value);
+
+        let n = value & 0x80 != 0;
+        let z = value == 0;
+
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 5;
+    }
+
     fn op_pha(&mut self) {
         // PHA - Push Accumulator
         // push A                            N Z C I D V
@@ -1184,6 +1239,61 @@ impl CPU {
         self.cycles += 3;
     }
 
+    fn op_eor_abs(&mut self) {
+        // EOR - Exclusive OR
+        // A = A XOR M                       N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      EOR oper     4D        3      4
+
+        let (address, value) = self.absolute();
+
+        self.trace_opcode(
+            3,
+            format!("4D {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("EOR ${:04X} = {:02X}", address, value),
+        );
+
+        self.acc_xor(value);
+
+        self.cycles += 4;
+    }
+
+    fn op_lsr_abs(&mut self) {
+        // LSR - Logical Shift Right
+        // 0 -> [76543210] -> C              N Z C I D V
+        //                                   0 + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      LSR oper     4E        3      6
+
+        let (address, mut value) = self.absolute();
+
+        let c = value & 0x01 != 0;
+
+        value >>= 1;
+
+        self.trace_opcode(
+            3,
+            format!("4E {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("LSR ${:04X} = {:02X}", address, value),
+        );
+
+        self.memory_write(address, value);
+
+        let n = value & 0x80 != 0;
+        let z = value == 0;
+
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 6;
+    }
+
     // Opcodes 50-5F
     fn op_bvc(&mut self) {
         // BVC - Branch If Overflow Clear
@@ -1248,6 +1358,28 @@ impl CPU {
         self.acc_add(value);
 
         self.cycles += 6;
+    }
+
+    fn op_adc_zpg(&mut self) {
+        // ADC - Add Memory To ACC With Carry
+        // A = A + M + C                     N Z C I D V
+        //                                   + + + - - +
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage      ADC oper      65        2     3
+
+        let (address, value) = self.zeropage();
+
+        self.trace_opcode(
+            2,
+            format!("65 {:02X}", address),
+            format!("ADC ${:02X} = {:02X}", address, value),
+        );
+
+        self.acc_add(value);
+
+        self.cycles += 3;
     }
 
     fn op_pla(&mut self) {
