@@ -140,7 +140,7 @@ impl CPU {
                 0x69 => self.op_adc_imm(),
                 0x6A => self.op_ror_acc(),
                 // 0x6C => self.op_jmp_abs_ind(),
-                // 0x6D => self.op_adc_abs(),
+                0x6D => self.op_adc_abs(),
                 // 0x6E => self.op_ror_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
@@ -1492,6 +1492,28 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Carry, c);
 
         self.cycles += 2;
+    }
+
+    fn op_adc_abs(&mut self) {
+        // ADC - Add Memory To ACC With Carry
+        // A = A + M + C                      N Z C I D V
+        //                                    + + + - - +
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      ADC oper     6D        3      4
+
+        let (address, value) = self.absolute();
+
+        self.trace_opcode(
+            3,
+            format!("6D {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("ADC ${:04X} = {:02X}", address, value),
+        );
+
+        self.acc_add(value);
+
+        self.cycles += 4;
     }
 
     // Opcodes 70-7F
