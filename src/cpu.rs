@@ -236,7 +236,7 @@ impl CPU {
             0xE => match opcode {
                 0xE0 => self.op_cpx_imm(),
                 0xE1 => self.op_sbc_ind_x(),
-                // 0xE4 => self.op_cpx_zpg(),
+                0xE4 => self.op_cpx_zpg(),
                 0xE5 => self.op_sbc_zpg(),
                 // 0xE6 => self.op_inc_zpg(),
                 0xE8 => self.op_inx(),
@@ -286,7 +286,7 @@ impl CPU {
     }
 
     fn op_ora_ind_x(&mut self) {
-        // ORA X, ind - OR Memory With Accumulator
+        // ORA X, ind - OR Memory With ACC
         // A = A OR M                        N Z C I D V
         //                                   + + - - - -
         //
@@ -311,7 +311,7 @@ impl CPU {
     }
 
     fn op_ora_zpg(&mut self) {
-        // ORA - OR Memory With Accumulator
+        // ORA - OR Memory With ACC
         // A = A OR M                        N Z C I D V
         //                                   + + - - - -
         //
@@ -383,7 +383,7 @@ impl CPU {
     }
 
     fn op_ora_imm(&mut self) {
-        // ORA - OR Memory With Accumulator
+        // ORA - OR Memory With ACC
         // A = A OR M                        N Z C I D V
         //                                   + + - - - -
         //
@@ -430,7 +430,7 @@ impl CPU {
     }
 
     fn op_ora_abs(&mut self) {
-        // ORA - OR Memory With Accumulator
+        // ORA - OR Memory With ACC
         // A = A OR M                        N Z C I D V
         //                                   + + - - - -
         //
@@ -508,7 +508,7 @@ impl CPU {
     }
 
     fn op_ora_ind_y(&mut self) {
-        // ORA - OR Memory With Accumulator
+        // ORA - OR Memory With ACC
         // A = A OR M                        N Z C I D V
         //                                   + + - - - -
         //
@@ -537,7 +537,7 @@ impl CPU {
     }
 
     fn op_ora_zpg_x(&mut self) {
-        // ORA - OR Memory With Accumulator
+        // ORA - OR Memory With ACC
         // A = A OR M                        N Z C I D V
         //                                   + + - - - -
         //
@@ -608,7 +608,7 @@ impl CPU {
     }
 
     fn op_ora_abs_y(&mut self) {
-        // ORA - OR Memory With Accumulator
+        // ORA - OR Memory With ACC
         // A = A OR M                        N Z C I D V
         //                                   + + - - - -
         //
@@ -634,7 +634,7 @@ impl CPU {
     }
 
     fn op_ora_abs_x(&mut self) {
-        // ORA - OR Memory With Accumulator
+        // ORA - OR Memory With ACC
         // A = A OR M                        N Z C I D V
         //                                   + + - - - -
         //
@@ -1156,7 +1156,7 @@ impl CPU {
     }
 
     fn op_pha(&mut self) {
-        // PHA - Push Accumulator
+        // PHA - Push ACC
         // push A                            N Z C I D V
         //                                   - - - - - -
         //
@@ -1383,7 +1383,7 @@ impl CPU {
     }
 
     fn op_pla(&mut self) {
-        // PLA - Pull Accumulator From Stack
+        // PLA - Pull ACC From Stack
         // pop A                             N Z C I D V
         //                                   + + - - - -
         //
@@ -1498,7 +1498,7 @@ impl CPU {
 
     // Opcodes 80-8F
     fn op_sta_ind_x(&mut self) {
-        // STA - Store Accumulator In Memory
+        // STA - Store ACC In Memory
         // M = A                             N Z C I D V
         //                                   - - - - - -
         //
@@ -1545,7 +1545,7 @@ impl CPU {
     }
 
     fn op_sta_zpg(&mut self) {
-        // STA - Store Accumulator In Memory
+        // STA - Store ACC In Memory
         // M = A                             N Z C I D V
         //                                   - - - - - -
         //
@@ -1655,7 +1655,7 @@ impl CPU {
     }
 
     fn op_sta_abs(&mut self) {
-        // STA - Store Accumulator In Memory
+        // STA - Store ACC In Memory
         // M = A                             N Z C I D V
         //                                   - - - - - -
         //
@@ -1789,7 +1789,7 @@ impl CPU {
     }
 
     fn op_lda_ind_x(&mut self) {
-        // LDA - Load Accumulator With Memory
+        // LDA - Load ACC With Memory
         // A = M                             N Z C I D V
         //                                   + + - - - -
         //
@@ -1864,7 +1864,7 @@ impl CPU {
     }
 
     fn op_lda_zpg(&mut self) {
-        // LDA - Load Accumulator With Memory
+        // LDA - Load ACC With Memory
         // A = M                             N Z C I D V
         //                                   + + - - - -
         //
@@ -1930,7 +1930,7 @@ impl CPU {
     }
 
     fn op_lda_imm(&mut self) {
-        // LDA - Load Accumulator With Memory
+        // LDA - Load ACC With Memory
         // A = M                             N Z C I D V
         //                                   + + - - - -
         //
@@ -1974,7 +1974,7 @@ impl CPU {
     }
 
     fn op_lda_abs(&mut self) {
-        // LDA - Load Accumulator With Memory
+        // LDA - Load ACC With Memory
         // A = M                             N Z C I D V
         //                                   + + - - - -
         //
@@ -2115,7 +2115,7 @@ impl CPU {
     }
 
     fn op_cmp_ind_x(&mut self) {
-        // CMP - Compare Memory With Accumulator
+        // CMP - Compare Memory With ACC
         // A - M                             N Z C I D V
         //                                   + + + - - -
         //
@@ -2141,7 +2141,7 @@ impl CPU {
 
     fn op_cmp_zpg(&mut self) {
         // CMP - Compare Memory With ACC
-        // A = A - M                         N Z C I D V
+        // A - M                             N Z C I D V
         //                                   + + + - - -
         //
         // addressing    assembler    op    bytes cycles
@@ -2184,7 +2184,7 @@ impl CPU {
     }
 
     fn op_cmp_imm(&mut self) {
-        // CMP - Compare Memory With Accumulator
+        // CMP - Compare Memory With ACC
         // A - M                             N Z C I D V
         //                                   + + + - - -
         //
@@ -2293,16 +2293,7 @@ impl CPU {
             format!("CPX #${:02X}", value),
         );
 
-        let x = self.registers.x;
-        let result = x.wrapping_sub(value);
-
-        let n = result & 0x80 != 0;
-        let z = result == 0;
-        let c = x >= value;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.index_compare(self.registers.x, value);
 
         self.cycles += 2;
     }
@@ -2330,6 +2321,28 @@ impl CPU {
         self.acc_subtract(value);
 
         self.cycles += 6;
+    }
+
+    fn op_cpx_zpg(&mut self) {
+        // CPX - Compare Memory And Index X
+        // X - M                             N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage      CPX oper     E4        2      3
+
+        let (address, value) = self.zeropage();
+
+        self.trace_opcode(
+            2,
+            format!("E4 {:02X}", address),
+            format!("CPX ${:02X} = {:02X}", address, value),
+        );
+
+        self.index_compare(self.registers.x, value);
+
+        self.cycles += 3;
     }
 
     fn op_sbc_zpg(&mut self) {
@@ -2633,11 +2646,23 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Zero, z);
     }
 
+    fn index_compare(&mut self, index: u8, value: u8) {
+        let result = index.wrapping_sub(value);
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+        let c = index >= value;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+    }
+
     fn x_load(&mut self, value: u8) {
         self.registers.x = value;
 
-        let n = self.registers.x & 0x80 != 0;
-        let z = self.registers.x == 0;
+        let n = value & 0x80 != 0;
+        let z = value == 0;
 
         self.registers.set_status_flag(StatusFlag::Negative, n);
         self.registers.set_status_flag(StatusFlag::Zero, z);
