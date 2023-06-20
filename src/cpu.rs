@@ -135,7 +135,7 @@ impl CPU {
                 0x60 => self.op_rts(),
                 0x61 => self.op_adc_ind_x(),
                 0x65 => self.op_adc_zpg(),
-                // 0x66 => self.op_ror_zpg(),
+                0x66 => self.op_ror_zpg(),
                 0x68 => self.op_pla(),
                 0x69 => self.op_adc_imm(),
                 0x6A => self.op_ror_acc(),
@@ -816,6 +816,12 @@ impl CPU {
 
         let (address, mut value) = self.zeropage();
 
+        self.trace_opcode(
+            2,
+            format!("26 {:02X}", address),
+            format!("ROL ${:02X} = {:02X}", address, value),
+        );
+
         let c = value & 0x80 != 0;
 
         value <<= 1;
@@ -823,12 +829,6 @@ impl CPU {
         if self.registers.get_status_flag(StatusFlag::Carry) {
             value |= 0x01;
         }
-
-        self.trace_opcode(
-            2,
-            format!("26 {:02X}", address),
-            format!("ROL ${:02X} = {:02X}", address, value),
-        );
 
         self.memory_write(address as u16, value);
 
@@ -1380,6 +1380,43 @@ impl CPU {
         self.acc_add(value);
 
         self.cycles += 3;
+    }
+
+    fn op_ror_zpg(&mut self) {
+        // ROR - Rotate Right
+        // C <- [76543210] <- C              N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage      ROR oper     66        2      5
+
+        let (address, mut value) = self.zeropage();
+
+        self.trace_opcode(
+            2,
+            format!("66 {:02X}", address),
+            format!("ROR ${:02X} = {:02X}", address, value),
+        );
+
+        let c = value & 0x01 != 0;
+
+        value >>= 1;
+
+        if self.registers.get_status_flag(StatusFlag::Carry) {
+            value |= 0x80;
+        }
+
+        self.memory_write(address, value);
+
+        let n = value & 0x80 != 0;
+        let z = value == 0;
+
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 5;
     }
 
     fn op_pla(&mut self) {
