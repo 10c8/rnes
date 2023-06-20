@@ -238,7 +238,7 @@ impl CPU {
                 0xE1 => self.op_sbc_ind_x(),
                 0xE4 => self.op_cpx_zpg(),
                 0xE5 => self.op_sbc_zpg(),
-                // 0xE6 => self.op_inc_zpg(),
+                0xE6 => self.op_inc_zpg(),
                 0xE8 => self.op_inx(),
                 0xE9 => self.op_sbc_imm(),
                 0xEA => self.op_nop(),
@@ -2424,6 +2424,36 @@ impl CPU {
         self.acc_subtract(value);
 
         self.cycles += 3;
+    }
+
+    fn op_inc_zpg(&mut self) {
+        // INC - Increment Memory By One
+        // M = M + 1                         N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage      INC oper     E6        2      5
+
+        let (address, value) = self.zeropage();
+
+        self.trace_opcode(
+            2,
+            format!("E6 {:02X}", address),
+            format!("INC ${:02X} = {:02X}", address, value),
+        );
+
+        let value = value.wrapping_add(1);
+
+        self.memory_write(address, value);
+
+        let n = value & 0x80 != 0;
+        let z = value == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 5;
     }
 
     fn op_inx(&mut self) {
