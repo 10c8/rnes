@@ -99,7 +99,7 @@ impl CPU {
             },
             0x3 => match opcode {
                 0x30 => self.op_bmi(),
-                // 0x31 => self.op_and_ind_y(),
+                0x31 => self.op_and_ind_y(),
                 // 0x35 => self.op_and_zpg_x(),
                 // 0x36 => self.op_rol_zpg_x(),
                 0x38 => self.op_sec(),
@@ -717,13 +717,7 @@ impl CPU {
             ),
         );
 
-        self.registers.a &= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_and(value);
 
         self.cycles += 6;
     }
@@ -773,13 +767,7 @@ impl CPU {
             format!("AND ${:02X} = {:02X}", address, value),
         );
 
-        self.registers.a &= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_and(value);
 
         self.cycles += 3;
     }
@@ -857,13 +845,7 @@ impl CPU {
             format!("AND #${:02X}", value),
         );
 
-        self.registers.a &= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_and(value);
 
         self.cycles += 2;
     }
@@ -944,13 +926,7 @@ impl CPU {
             format!("AND ${:04X} = {:02X}", address, value),
         );
 
-        self.registers.a &= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.acc_and(value);
 
         self.cycles += 4;
     }
@@ -1013,6 +989,35 @@ impl CPU {
         self.branch_if(StatusFlag::Negative, true, address);
 
         self.cycles += 2;
+    }
+
+    fn op_and_ind_y(&mut self) {
+        // AND - AND Memory With ACC
+        // A = A AND M                       N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler     op   bytes cycles
+        // ---------------------------------------------
+        // (indirect),Y  AND (oper),Y  31       2     5*
+
+        let (operator, base, address, value) = self.post_indexed_indirect();
+
+        self.trace_opcode(
+            2,
+            format!("31 {:02X}", operator),
+            format!(
+                "AND (${:02X}),Y = {:04X} @ {:04X} = {:02X}",
+                operator, base, address, value
+            ),
+        );
+
+        self.acc_and(value);
+
+        if address & 0xFF00 != base & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 5;
     }
 
     fn op_sec(&mut self) {
@@ -2981,6 +2986,16 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Carry, c);
     }
 
+    fn acc_and(&mut self, value: u8) {
+        self.registers.a &= value;
+
+        let n = self.registers.a & 0x80 != 0;
+        let z = self.registers.a == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+    }
+
     fn acc_or(&mut self, value: u8) {
         self.registers.a |= value;
 
@@ -3082,11 +3097,6 @@ impl CPU {
 
     fn memory_write(&mut self, address: u16, value: u8) {
         match address {
-            0x0000..=0x00FF => trace!("Zeropage write: {:04X} = {:02X}", address, value),
-            _ => {}
-        }
-
-        match address {
             0x0000..=0x401F => self.memory.write(address, value),
             0x4020..=0xFFFF => {
                 if let Some(mapper) = self.mapper.as_mut() {
@@ -3140,7 +3150,8 @@ impl CPU {
             self.cycles,
         );
 
-        trace!("{}", line);
+        // trace!("{}", line);
+
         self.trace_log.write_all(line.as_bytes()).unwrap();
         self.trace_log.write_all(b"\n").unwrap();
     }
