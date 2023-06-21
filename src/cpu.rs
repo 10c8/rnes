@@ -202,7 +202,7 @@ impl CPU {
                 // 0xB5 => self.op_lda_zpg_x(),
                 // 0xB6 => self.op_ldx_zpg_y(),
                 0xB8 => self.op_clv(),
-                // 0xB9 => self.op_lda_abs_y(),
+                0xB9 => self.op_lda_abs_y(),
                 0xBA => self.op_tsx(),
                 // 0xBC => self.op_ldy_abs_x(),
                 // 0xBD => self.op_lda_abs_x(),
@@ -599,7 +599,7 @@ impl CPU {
 
         self.trace_opcode(
             3,
-            format!("19 {:04X}", operator),
+            format!("19 {:02X} {:02X}", operator & 0xFF, operator >> 8),
             format!("ORA ${:04X},Y @ {:04X} = {:02X}", operator, address, value),
         );
 
@@ -2311,6 +2311,32 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Overflow, false);
 
         self.cycles += 2;
+    }
+
+    fn op_lda_abs_y(&mut self) {
+        // LDA - Load ACC With Memory
+        // A = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute,y    LDA oper,Y   B9        3     4*
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+
+        self.trace_opcode(
+            3,
+            format!("B9 {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("LDA ${:04X},Y @ {:04X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_load(value);
+
+        if address & 0xFF00 != operator & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 4;
     }
 
     fn op_tsx(&mut self) {
