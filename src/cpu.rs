@@ -250,7 +250,7 @@ impl CPU {
             },
             0xF => match opcode {
                 0xF0 => self.op_beq(),
-                // 0xF1 => self.op_sbc_ind_y(),
+                0xF1 => self.op_sbc_ind_y(),
                 // 0xF5 => self.op_sbc_zpg_x(),
                 // 0xF6 => self.op_inc_zpg_x(),
                 0xF8 => self.op_sed(),
@@ -2903,6 +2903,35 @@ impl CPU {
         self.branch_if(StatusFlag::Zero, true, address);
 
         self.cycles += 2;
+    }
+
+    fn op_sbc_ind_y(&mut self) {
+        // SBC - Subtract Memory From ACC With Borrow
+        // A - M - C                         N Z C I D V
+        //                                   + + + - - +
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // (indirect),Y  SBC (oper),Y F1        2     5*
+
+        let (operator, base, address, value) = self.post_indexed_indirect();
+
+        self.trace_opcode(
+            2,
+            format!("F1 {:02X}", operator),
+            format!(
+                "SBC (${:02X}),Y = {:04X} @ {:04X} = {:02X}",
+                operator, base, address, value
+            ),
+        );
+
+        self.acc_subtract(value);
+
+        if address & 0xFF00 != base & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 5;
     }
 
     fn op_sed(&mut self) {
