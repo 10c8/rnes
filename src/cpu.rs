@@ -105,7 +105,7 @@ impl CPU {
                 0x38 => self.op_sec(),
                 0x39 => self.op_and_abs_y(),
                 0x3D => self.op_and_abs_x(),
-                // 0x3E => self.op_rol_abs_x(),
+                0x3E => self.op_rol_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0x4 => match opcode {
@@ -1016,28 +1016,6 @@ impl CPU {
         self.cycles += 5;
     }
 
-    fn op_and_abs_x(&mut self) {
-        // AND - AND Memory With ACC
-        // A = A AND M                       N Z C I D V
-        //                                   + + - - - -
-        //
-        // addressing    assembler     op   bytes cycles
-        // ---------------------------------------------
-        // absolute,X    AND $oper,X   3D       3     4*
-
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
-
-        self.trace_opcode(
-            3,
-            format!("3D {:02X} {:02X}", operator & 0xFF, operator >> 8),
-            format!("AND ${:04X},X @ {:04X} = {:02X}", operator, address, value),
-        );
-
-        self.acc_and(value);
-
-        self.cycles += 4;
-    }
-
     fn op_and_zpg_x(&mut self) {
         // AND - AND Memory With ACC
         // A = A AND M                       N Z C I D V
@@ -1136,6 +1114,64 @@ impl CPU {
         }
 
         self.cycles += 4;
+    }
+
+    fn op_and_abs_x(&mut self) {
+        // AND - AND Memory With ACC
+        // A = A AND M                       N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler     op   bytes cycles
+        // ---------------------------------------------
+        // absolute,X    AND $oper,X   3D       3     4*
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+
+        self.trace_opcode(
+            3,
+            format!("3D {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("AND ${:04X},X @ {:04X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_and(value);
+
+        self.cycles += 4;
+    }
+
+    fn op_rol_abs_x(&mut self) {
+        // ROL - Rotate Left (Memory)
+        // C <- [76543210] <- C              N Z C I D V
+        //                                   + + $ - - -
+        //
+        // addressing    assembler     op   bytes cycles
+        // ---------------------------------------------
+        // absolute,X    ROL oper,X    3E       3     7
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+
+        self.trace_opcode(
+            3,
+            format!("3E {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("ROL ${:04X},X @ {:04X} = {:02X}", operator, address, value),
+        );
+
+        let mut result = value.wrapping_shl(1);
+
+        if self.registers.get_status_flag(StatusFlag::Carry) {
+            result |= 0x01;
+        }
+
+        self.memory_write(address as u16, result);
+
+        let c = value & 0x80 != 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 7;
     }
 
     // Opcodes 40-4F
