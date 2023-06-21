@@ -197,7 +197,7 @@ impl CPU {
             },
             0xB => match opcode {
                 0xB0 => self.op_bcs(),
-                // 0xB1 => self.op_lda_ind_y(),
+                0xB1 => self.op_lda_ind_y(),
                 // 0xB4 => self.op_ldy_zpg_x(),
                 // 0xB5 => self.op_lda_zpg_x(),
                 // 0xB6 => self.op_ldx_zpg_y(),
@@ -295,7 +295,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect,X)  ORA (oper,X)  01       2      6
 
-        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect();
 
         self.trace_opcode(
             2,
@@ -504,9 +504,9 @@ impl CPU {
         //
         // addressing    assembler     op   bytes cycles
         // ---------------------------------------------
-        // (indirect),Y  ORA ($oper),Y 11       2     5*
+        // (indirect),Y  ORA (oper),Y  11       2     5*
 
-        let (operator, base, address, value) = self.post_indexed_indirect(self.registers.y);
+        let (operator, base, address, value) = self.post_indexed_indirect();
 
         self.trace_opcode(
             2,
@@ -605,7 +605,7 @@ impl CPU {
 
         self.acc_or(value);
 
-        if address & 0xFF00 != address & 0xFF00 {
+        if address & 0xFF00 != (address - self.registers.y as u16) & 0xFF00 {
             self.cycles += 1;
         }
 
@@ -631,7 +631,7 @@ impl CPU {
 
         self.acc_or(value);
 
-        if address & 0xFF00 != address & 0xFF00 {
+        if address & 0xFF00 != (address - self.registers.x as u16) & 0xFF00 {
             self.cycles += 1;
         }
 
@@ -706,7 +706,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect,X)  AND (oper,X)  21       2      6
 
-        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect();
 
         self.trace_opcode(
             2,
@@ -1063,7 +1063,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect,X) EOR (oper,X)   41       2      6
 
-        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect();
 
         self.trace_opcode(
             2,
@@ -1323,7 +1323,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect,X)  ADC (oper,X) 61        2     6*
 
-        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect();
 
         self.trace_opcode(
             2,
@@ -1581,7 +1581,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect,X)  STA (oper,X) 81        2      6
 
-        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect();
 
         self.trace_opcode(
             2,
@@ -1872,7 +1872,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect,X)  LDA (oper,X) A1        2     6*
 
-        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect();
 
         self.trace_opcode(
             2,
@@ -2077,7 +2077,7 @@ impl CPU {
         //
         // addressing    assembler    op    bytes cycles
         // ---------------------------------------------
-        // absolute      LDA $imm     AD        3      4
+        // absolute      LDA oper     AD        3      4
 
         let (address, value) = self.absolute();
 
@@ -2099,7 +2099,7 @@ impl CPU {
         //
         // addressing    assembler    op    bytes cycles
         // ---------------------------------------------
-        // absolute      LDX $imm     AE        3     4*
+        // absolute      LDX oper     AE        3      4
 
         let (address, value) = self.absolute();
 
@@ -2110,10 +2110,6 @@ impl CPU {
         );
 
         self.x_load(value);
-
-        if address & 0xFF00 != (address - 1) & 0xFF00 {
-            self.cycles += 1;
-        }
 
         self.cycles += 4;
     }
@@ -2139,6 +2135,35 @@ impl CPU {
         self.branch_if(StatusFlag::Carry, true, address);
 
         self.cycles += 2;
+    }
+
+    fn op_lda_ind_y(&mut self) {
+        // LDA - Load ACC With Memory
+        // A = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // (indirect),y  LDA (oper),Y B1        2     5*
+
+        let (operator, base, address, value) = self.post_indexed_indirect();
+
+        self.trace_opcode(
+            2,
+            format!("B1 {:02X}", operator),
+            format!(
+                "LDA (${:02X}),Y = {:04X} @ {:04X} = {:02X}",
+                operator, base, address, value
+            ),
+        );
+
+        self.acc_load(value);
+
+        if address & 0xFF00 != base & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 5;
     }
 
     fn op_clv(&mut self) {
@@ -2220,7 +2245,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect,X)  CMP (oper,X) C1        2      6
 
-        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect();
 
         self.trace_opcode(
             2,
@@ -2530,7 +2555,7 @@ impl CPU {
         // ---------------------------------------------
         // (indirect,X)  SBC (oper,X) E1        2      6
 
-        let (operator, indirect, address, value) = self.pre_indexed_indirect(self.registers.x);
+        let (operator, indirect, address, value) = self.pre_indexed_indirect();
 
         self.trace_opcode(
             2,
@@ -2852,14 +2877,14 @@ impl CPU {
         (operator, address, value)
     }
 
-    fn pre_indexed_indirect(&mut self, index: u8) -> (u8, u8, u16, u8) {
+    fn pre_indexed_indirect(&mut self) -> (u8, u8, u16, u8) {
         let operator = self.memory_read(self.registers.pc);
         self.registers.pc += 1;
 
-        let indirect = operator.wrapping_add(index);
+        let indirect = operator.wrapping_add(self.registers.x);
 
-        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
         let address_lo = self.memory_read(indirect as u16) as u16;
+        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
         let address = (address_hi << 8) | address_lo;
 
         let value = self.memory_read(address);
@@ -2867,12 +2892,15 @@ impl CPU {
         (operator, indirect, address, value)
     }
 
-    fn post_indexed_indirect(&mut self, index: u8) -> (u8, u16, u16, u8) {
+    fn post_indexed_indirect(&mut self) -> (u8, u16, u16, u8) {
         let operator = self.memory_read(self.registers.pc);
         self.registers.pc += 1;
 
-        let base = self.memory_read_u16(operator as u16);
-        let address = base.wrapping_add(index as u16);
+        let base_lo = self.memory_read(operator as u16) as u16;
+        let base_hi = self.memory_read(operator.wrapping_add(1) as u16) as u16;
+        let base = (base_hi << 8) | base_lo;
+
+        let address = base.wrapping_add(self.registers.y as u16);
 
         let value = self.memory_read(address);
 
