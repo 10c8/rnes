@@ -123,7 +123,7 @@ impl CPU {
             },
             0x5 => match opcode {
                 0x50 => self.op_bvc(),
-                // 0x51 => self.op_eor_ind_y(),
+                0x51 => self.op_eor_ind_y(),
                 // 0x55 => self.op_eor_zpg_x(),
                 // 0x56 => self.op_lsr_zpg_x(),
                 // 0x58 => self.op_cli(),
@@ -1299,6 +1299,35 @@ impl CPU {
         self.branch_if(StatusFlag::Overflow, false, address);
 
         self.cycles += 2;
+    }
+
+    fn op_eor_ind_y(&mut self) {
+        // EOR - Exclusive OR
+        // A = A XOR M                       N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // (indirect),Y  EOR (oper),Y 51        2     5*
+
+        let (operator, base, address, value) = self.post_indexed_indirect();
+
+        self.trace_opcode(
+            2,
+            format!("51 {:02X}", operator),
+            format!(
+                "EOR (${:02X}),Y = {:04X} @ {:04X} = {:02X}",
+                operator, base, address, value
+            ),
+        );
+
+        self.acc_xor(value);
+
+        if address & 0x80 != base & 0x80 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 5;
     }
 
     // Opcodes 60-6F
