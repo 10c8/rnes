@@ -173,7 +173,7 @@ impl CPU {
                 0x91 => self.op_sta_ind_y(),
                 0x94 => self.op_sty_zpg_x(),
                 0x95 => self.op_sta_zpg_x(),
-                // 0x96 => self.op_stx_zpg_y(),
+                0x96 => self.op_stx_zpg_y(),
                 0x98 => self.op_tya(),
                 0x99 => self.op_sta_abs_y(),
                 0x9A => self.op_txs(),
@@ -2210,6 +2210,28 @@ impl CPU {
         );
 
         self.memory_write(address as u16, self.registers.a);
+
+        self.cycles += 4;
+    }
+
+    fn op_stx_zpg_y(&mut self) {
+        // STX - Store Index X In Memory
+        // M = X                             N Z C I D V
+        //                                   - - - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,Y    STX oper,Y   96        2      4
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.y);
+
+        self.trace_opcode(
+            2,
+            format!("96 {:02X}", operator),
+            format!("STX ${:02X},Y @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        self.memory_write(address as u16, self.registers.x);
 
         self.cycles += 4;
     }
