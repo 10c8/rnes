@@ -175,7 +175,7 @@ impl CPU {
                 // 0x95 => self.op_sta_zpg_x(),
                 // 0x96 => self.op_stx_zpg_y(),
                 0x98 => self.op_tya(),
-                // 0x99 => self.op_sta_abs_y(),
+                0x99 => self.op_sta_abs_y(),
                 0x9A => self.op_txs(),
                 // 0x9D => self.op_sta_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -2025,6 +2025,28 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
+    }
+
+    fn op_sta_abs_y(&mut self) {
+        // STA - Store ACC In Memory
+        // M = A                             N Z C I D V
+        //                                   - - - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute,Y    STA oper,Y   99        3      5
+
+        let (operand, address, value) = self.indexed_absolute(self.registers.y);
+
+        self.trace_opcode(
+            3,
+            format!("99 {:02X} {:02X}", operand & 0xFF, operand >> 8),
+            format!("STA ${:04X},Y @ {:04X} = {:02X}", operand, address, value),
+        );
+
+        self.memory_write(address, self.registers.a);
+
+        self.cycles += 5;
     }
 
     fn op_txs(&mut self) {
