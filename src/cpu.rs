@@ -198,7 +198,7 @@ impl CPU {
             0xB => match opcode {
                 0xB0 => self.op_bcs(),
                 0xB1 => self.op_lda_ind_y(),
-                // 0xB4 => self.op_ldy_zpg_x(),
+                0xB4 => self.op_ldy_zpg_x(),
                 // 0xB5 => self.op_lda_zpg_x(),
                 // 0xB6 => self.op_ldx_zpg_y(),
                 0xB8 => self.op_clv(),
@@ -1578,23 +1578,23 @@ impl CPU {
         // the 6502 took the low byte of the address
         // from $30FF and the high byte from $3000.
 
-        let operand_lo = self.memory_read(self.registers.pc);
-        let operand_hi = self.memory_read(self.registers.pc.wrapping_add(1));
-        let operand = ((operand_hi as u16) << 8) | operand_lo as u16;
+        let operator_lo = self.memory_read(self.registers.pc);
+        let operator_hi = self.memory_read(self.registers.pc.wrapping_add(1));
+        let operator = ((operator_hi as u16) << 8) | operator_lo as u16;
 
-        let address_lo = self.memory_read(operand);
-        let address_hi = if operand_lo == 0xFF {
+        let address_lo = self.memory_read(operator);
+        let address_hi = if operator_lo == 0xFF {
             // Wrap around the page
-            self.memory_read(operand & 0xFF00)
+            self.memory_read(operator & 0xFF00)
         } else {
-            self.memory_read(operand.wrapping_add(1))
+            self.memory_read(operator.wrapping_add(1))
         };
         let address = ((address_hi as u16) << 8) | address_lo as u16;
 
         self.trace_opcode(
             1,
-            format!("6C {:02X} {:02X}", operand_lo, operand_hi),
-            format!("JMP (${:04X}) = {:04X}", operand, address),
+            format!("6C {:02X} {:02X}", operator_lo, operator_hi),
+            format!("JMP (${:04X}) = {:04X}", operator, address),
         );
 
         self.registers.pc = address;
@@ -2036,12 +2036,12 @@ impl CPU {
         // ---------------------------------------------
         // absolute,Y    STA oper,Y   99        3      5
 
-        let (operand, address, value) = self.indexed_absolute(self.registers.y);
+        let (operator, address, value) = self.indexed_absolute(self.registers.y);
 
         self.trace_opcode(
             3,
-            format!("99 {:02X} {:02X}", operand & 0xFF, operand >> 8),
-            format!("STA ${:04X},Y @ {:04X} = {:02X}", operand, address, value),
+            format!("99 {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("STA ${:04X},Y @ {:04X} = {:02X}", operator, address, value),
         );
 
         self.memory_write(address, self.registers.a);
@@ -2395,6 +2395,28 @@ impl CPU {
         }
 
         self.cycles += 5;
+    }
+
+    fn op_ldy_zpg_x(&mut self) {
+        // LDY - Load Index Y With Memory
+        // Y = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,x    LDY oper,X   B4        2     4
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("B4 {:02X}", operator),
+            format!("LDY ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        self.y_load(value);
+
+        self.cycles += 4;
     }
 
     fn op_clv(&mut self) {
