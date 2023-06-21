@@ -129,7 +129,7 @@ impl CPU {
                 // 0x58 => self.op_cli(),
                 0x59 => self.op_eor_abs_y(),
                 0x5D => self.op_eor_abs_x(),
-                // 0x5E => self.op_lsr_abs_x(),
+                0x5E => self.op_lsr_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0x6 => match opcode {
@@ -646,22 +646,21 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    ASL $oper,X   1E       3      7
 
-        let (operator, address, mut value) = self.indexed_absolute(self.registers.x);
-
-        let c = value & 0x80 != 0;
-
-        value = value.wrapping_shl(1);
+        let (operator, address, value) = self.indexed_absolute(self.registers.x);
 
         self.trace_opcode(
             3,
-            format!("1E {:04X}", operator),
+            format!("1E {:02X} {:02X}", operator & 0xFF, operator >> 8),
             format!("ASL ${:04X},X @ {:04X} = {:02X}", operator, address, value),
         );
 
-        self.memory_write(address, value);
+        let result = value.wrapping_shl(1);
 
-        let n = value & 0x80 != 0;
-        let z = value == 0;
+        self.memory_write(address, result);
+
+        let c = value & 0x80 != 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
 
         self.registers.set_status_flag(StatusFlag::Carry, c);
         self.registers.set_status_flag(StatusFlag::Negative, n);
@@ -1535,6 +1534,38 @@ impl CPU {
         }
 
         self.cycles += 4;
+    }
+
+    fn op_lsr_abs_x(&mut self) {
+        // LSR - Logical Shift Right
+        // 0 -> [76543210] -> C              N Z C I D V
+        //                                   0 + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute,X    LSR oper,X   5E        3      7
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+
+        self.trace_opcode(
+            3,
+            format!("5E {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("LSR ${:04X},X @ {:04X} = {:02X}", operator, address, value),
+        );
+
+        let result = value.wrapping_shr(1);
+
+        self.memory_write(address as u16, result);
+
+        let c = value & 0x01 != 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 7;
     }
 
     // Opcodes 60-6F
