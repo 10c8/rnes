@@ -170,7 +170,7 @@ impl CPU {
             },
             0x9 => match opcode {
                 0x90 => self.op_bcc(),
-                // 0x91 => self.op_sta_ind_y(),
+                0x91 => self.op_sta_ind_y(),
                 // 0x94 => self.op_sty_zpg_x(),
                 // 0x95 => self.op_sta_zpg_x(),
                 // 0x96 => self.op_stx_zpg_y(),
@@ -1857,6 +1857,31 @@ impl CPU {
         self.branch_if(StatusFlag::Carry, false, address);
 
         self.cycles += 2;
+    }
+
+    fn op_sta_ind_y(&mut self) {
+        // STA - Store ACC In Memory
+        // M = A                             N Z C I D V
+        //                                   - - - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // indirect,Y    STA (oper),Y 91        2      6
+
+        let (operator, base, address, value) = self.post_indexed_indirect();
+
+        self.trace_opcode(
+            2,
+            format!("91 {:02X}", operator),
+            format!(
+                "STA (${:02X}),Y = {:04X} @ {:04X} = {:02X}",
+                operator, address, base, value
+            ),
+        );
+
+        self.memory_write(address, self.registers.a);
+
+        self.cycles += 6;
     }
 
     fn op_tya(&mut self) {
