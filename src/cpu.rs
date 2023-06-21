@@ -149,7 +149,7 @@ impl CPU {
                 0x70 => self.op_bvs(),
                 0x71 => self.op_adc_ind_y(),
                 0x75 => self.op_adc_zpg_x(),
-                // 0x76 => self.op_ror_zpg_x(),
+                0x76 => self.op_ror_zpg_x(),
                 0x78 => self.op_sei(),
                 0x79 => self.op_adc_abs_y(),
                 // 0x7D => self.op_adc_abs_x(),
@@ -1804,6 +1804,42 @@ impl CPU {
         self.acc_add(value);
 
         self.cycles += 4;
+    }
+
+    fn op_ror_zpg_x(&mut self) {
+        // ROR - Rotate Right
+        // C <- [76543210] <- C              N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,X    ROR oper,X   76        2      6
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("76 {:02X}", operator),
+            format!("ROR ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        let mut result = value.wrapping_shr(1);
+
+        if self.registers.get_status_flag(StatusFlag::Carry) {
+            result |= 0x80;
+        }
+
+        self.memory_write(address as u16, result);
+
+        let c = value & 0x01 != 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 6;
     }
 
     fn op_sei(&mut self) {
