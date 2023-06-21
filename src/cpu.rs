@@ -124,7 +124,7 @@ impl CPU {
             0x5 => match opcode {
                 0x50 => self.op_bvc(),
                 0x51 => self.op_eor_ind_y(),
-                // 0x55 => self.op_eor_zpg_x(),
+                0x55 => self.op_eor_zpg_x(),
                 // 0x56 => self.op_lsr_zpg_x(),
                 // 0x58 => self.op_cli(),
                 0x59 => self.op_eor_abs_y(),
@@ -1376,6 +1376,28 @@ impl CPU {
         }
 
         self.cycles += 5;
+    }
+
+    fn op_eor_zpg_x(&mut self) {
+        // EOR - Exclusive OR
+        // A = A XOR M                       N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,X    EOR oper,X   55        2     4
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("55 {:02X}", operator),
+            format!("EOR ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_xor(value);
+
+        self.cycles += 4;
     }
 
     fn op_eor_abs_y(&mut self) {
