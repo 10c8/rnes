@@ -256,7 +256,7 @@ impl CPU {
                 0xF8 => self.op_sed(),
                 0xF9 => self.op_sbc_abs_y(),
                 0xFD => self.op_sbc_abs_x(),
-                // 0xFE => self.op_inc_abs_x(),
+                0xFE => self.op_inc_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -3898,6 +3898,36 @@ impl CPU {
         }
 
         self.cycles += 4;
+    }
+
+    fn op_inc_abs_x(&mut self) {
+        // INC - Increment Memory By One
+        // M = M + 1                         N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute,X    INC oper,X   FE        3     7
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+
+        self.trace_opcode(
+            3,
+            format!("FE {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("INC ${:04X},X @ {:04X} = {:02X}", operator, address, value),
+        );
+
+        let result = value.wrapping_add(1);
+
+        self.memory_write(address as u16, result);
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 7;
     }
 
     // Addressing
