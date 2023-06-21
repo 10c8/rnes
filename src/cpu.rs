@@ -226,7 +226,7 @@ impl CPU {
             0xD => match opcode {
                 0xD0 => self.op_bne(),
                 0xD1 => self.op_cmp_ind_y(),
-                // 0xD5 => self.op_cmp_zpg_x(),
+                0xD5 => self.op_cmp_zpg_x(),
                 // 0xD6 => self.op_dec_zpg_x(),
                 0xD8 => self.op_cld(),
                 0xD9 => self.op_cmp_abs_y(),
@@ -2901,6 +2901,28 @@ impl CPU {
         }
 
         self.cycles += 5;
+    }
+
+    fn op_cmp_zpg_x(&mut self) {
+        // CMP - Compare Memory With ACC
+        // A - M                             N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,X    CMP oper,X   D5        2     4
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("D5 {:02X}", operator),
+            format!("CMP ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_compare(value);
+
+        self.cycles += 4;
     }
 
     fn op_cld(&mut self) {
