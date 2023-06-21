@@ -142,7 +142,7 @@ impl CPU {
                 0x6A => self.op_ror_acc(),
                 // 0x6C => self.op_jmp_abs_ind(),
                 0x6D => self.op_adc_abs(),
-                // 0x6E => self.op_ror_abs(),
+                0x6E => self.op_ror_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0x7 => match opcode {
@@ -966,6 +966,12 @@ impl CPU {
 
         let (address, mut value) = self.absolute();
 
+        self.trace_opcode(
+            3,
+            format!("2E {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("ROL ${:04X} = {:02X}", address, value),
+        );
+
         let c = value & 0x80 != 0;
 
         value <<= 1;
@@ -973,12 +979,6 @@ impl CPU {
         if self.registers.get_status_flag(StatusFlag::Carry) {
             value |= 0x01;
         }
-
-        self.trace_opcode(
-            3,
-            format!("2E {:02X}", address),
-            format!("ROL ${:04X} = {:02X}", address, value),
-        );
 
         self.memory_write(address, value);
 
@@ -1493,6 +1493,43 @@ impl CPU {
         self.acc_add(value);
 
         self.cycles += 4;
+    }
+
+    fn op_ror_abs(&mut self) {
+        // ROR - Rotate Right
+        // C <- [76543210] <- C              N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      ROR oper     6E        3      6
+
+        let (address, mut value) = self.absolute();
+
+        self.trace_opcode(
+            3,
+            format!("6E {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("ROR ${:04X} = {:02X}", address, value),
+        );
+
+        let c = value & 0x01 != 0;
+
+        value >>= 1;
+
+        if self.registers.get_status_flag(StatusFlag::Carry) {
+            value |= 0x80;
+        }
+
+        self.memory_write(address, value);
+
+        let n = value & 0x80 != 0;
+        let z = value == 0;
+
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 6;
     }
 
     // Opcodes 70-7F
