@@ -251,7 +251,7 @@ impl CPU {
             0xF => match opcode {
                 0xF0 => self.op_beq(),
                 0xF1 => self.op_sbc_ind_y(),
-                // 0xF5 => self.op_sbc_zpg_x(),
+                0xF5 => self.op_sbc_zpg_x(),
                 // 0xF6 => self.op_inc_zpg_x(),
                 0xF8 => self.op_sed(),
                 0xF9 => self.op_sbc_abs_y(),
@@ -3284,6 +3284,28 @@ impl CPU {
         }
 
         self.cycles += 5;
+    }
+
+    fn op_sbc_zpg_x(&mut self) {
+        // SBC - Subtract Memory From ACC With Borrow
+        // A - M - C                         N Z C I D V
+        //                                   + + + - - +
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,X    SBC oper,X   F5        2     4
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("F5 {:02X}", operator),
+            format!("SBC ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_subtract(value);
+
+        self.cycles += 4;
     }
 
     fn op_sed(&mut self) {
