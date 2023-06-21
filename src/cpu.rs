@@ -147,7 +147,7 @@ impl CPU {
             },
             0x7 => match opcode {
                 0x70 => self.op_bvs(),
-                // 0x71 => self.op_adc_ind_y(),
+                0x71 => self.op_adc_ind_y(),
                 // 0x75 => self.op_adc_zpg_x(),
                 // 0x76 => self.op_ror_zpg_x(),
                 0x78 => self.op_sei(),
@@ -1323,7 +1323,7 @@ impl CPU {
 
         self.acc_xor(value);
 
-        if address & 0x80 != base & 0x80 {
+        if address & 0xFF00 != base & 0xFF00 {
             self.cycles += 1;
         }
 
@@ -1587,6 +1587,35 @@ impl CPU {
         self.branch_if(StatusFlag::Overflow, true, address);
 
         self.cycles += 2;
+    }
+
+    fn op_adc_ind_y(&mut self) {
+        // ADC - Add Memory To ACC With Carry
+        // A = A + M + C                      N Z C I D V
+        //                                    + + + - - +
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // (indirect),Y  ADC (oper),Y 71        2      5*
+
+        let (operator, base, address, value) = self.post_indexed_indirect();
+
+        self.trace_opcode(
+            2,
+            format!("71 {:02X}", operator),
+            format!(
+                "ADC (${:02X}),Y = {:04X} @ {:04X} = {:02X}",
+                operator, base, address, value
+            ),
+        );
+
+        self.acc_add(value);
+
+        if address & 0xFF00 != base & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 5;
     }
 
     fn op_sei(&mut self) {
