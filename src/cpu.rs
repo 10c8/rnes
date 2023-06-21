@@ -127,7 +127,7 @@ impl CPU {
                 // 0x55 => self.op_eor_zpg_x(),
                 // 0x56 => self.op_lsr_zpg_x(),
                 // 0x58 => self.op_cli(),
-                // 0x59 => self.op_eor_imm(),
+                0x59 => self.op_eor_abs_y(),
                 // 0x5D => self.op_eor_abs_x(),
                 // 0x5E => self.op_lsr_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -1354,6 +1354,32 @@ impl CPU {
         }
 
         self.cycles += 5;
+    }
+
+    fn op_eor_abs_y(&mut self) {
+        // EOR - Exclusive OR
+        // A = A XOR M                       N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute,Y    EOR oper,Y   59        3     4*
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+
+        self.trace_opcode(
+            3,
+            format!("59 {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("EOR ${:04X},Y @ {:04X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_xor(value);
+
+        if address & 0xFF00 != operator & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 4;
     }
 
     // Opcodes 60-6F
