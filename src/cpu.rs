@@ -254,7 +254,7 @@ impl CPU {
                 // 0xF5 => self.op_sbc_zpg_x(),
                 // 0xF6 => self.op_inc_zpg_x(),
                 0xF8 => self.op_sed(),
-                // 0xF9 => self.op_sbc_abs_y(),
+                0xF9 => self.op_sbc_abs_y(),
                 // 0xFD => self.op_sbc_abs_x(),
                 // 0xFE => self.op_inc_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -3146,6 +3146,32 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Decimal, true);
 
         self.cycles += 2;
+    }
+
+    fn op_sbc_abs_y(&mut self) {
+        // SBC - Subtract Memory From ACC With Borrow
+        // A - M - C                         N Z C I D V
+        //                                   + + + - - +
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute,Y    SBC oper,Y   F9        3     4*
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+
+        self.trace_opcode(
+            3,
+            format!("F9 {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("SBC ${:04X},Y @ {:04X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_subtract(value);
+
+        if address & 0xFF00 != operator & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 4;
     }
 
     // Addressing
