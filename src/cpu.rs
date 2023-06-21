@@ -199,7 +199,7 @@ impl CPU {
                 0xB0 => self.op_bcs(),
                 0xB1 => self.op_lda_ind_y(),
                 0xB4 => self.op_ldy_zpg_x(),
-                // 0xB5 => self.op_lda_zpg_x(),
+                0xB5 => self.op_lda_zpg_x(),
                 // 0xB6 => self.op_ldx_zpg_y(),
                 0xB8 => self.op_clv(),
                 0xB9 => self.op_lda_abs_y(),
@@ -2503,6 +2503,28 @@ impl CPU {
         );
 
         self.y_load(value);
+
+        self.cycles += 4;
+    }
+
+    fn op_lda_zpg_x(&mut self) {
+        // LDA - Load ACC With Memory
+        // A = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,x    LDA oper,X   B5        2      4
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("B5 {:02X}", operator),
+            format!("LDA ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_load(value);
 
         self.cycles += 4;
     }
