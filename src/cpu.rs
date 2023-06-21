@@ -227,7 +227,7 @@ impl CPU {
                 0xD0 => self.op_bne(),
                 0xD1 => self.op_cmp_ind_y(),
                 0xD5 => self.op_cmp_zpg_x(),
-                // 0xD6 => self.op_dec_zpg_x(),
+                0xD6 => self.op_dec_zpg_x(),
                 0xD8 => self.op_cld(),
                 0xD9 => self.op_cmp_abs_y(),
                 // 0xDD => self.op_cmp_abs_x(),
@@ -3066,6 +3066,36 @@ impl CPU {
         self.acc_compare(value);
 
         self.cycles += 4;
+    }
+
+    fn op_dec_zpg_x(&mut self) {
+        // DEC - Decrement Memory By One
+        // M = M - 1                         N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,X    DEC oper,X   D6        2     6
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("D6 {:02X}", operator),
+            format!("DEC ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        let result = value.wrapping_sub(1);
+
+        self.memory_write(address as u16, result);
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 6;
     }
 
     fn op_cld(&mut self) {
