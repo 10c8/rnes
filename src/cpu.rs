@@ -230,7 +230,7 @@ impl CPU {
                 0xD6 => self.op_dec_zpg_x(),
                 0xD8 => self.op_cld(),
                 0xD9 => self.op_cmp_abs_y(),
-                // 0xDD => self.op_cmp_abs_x(),
+                0xDD => self.op_cmp_abs_x(),
                 // 0xDE => self.op_dec_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
@@ -3273,6 +3273,32 @@ impl CPU {
             3,
             format!("D9 {:02X} {:02X}", operator & 0xFF, operator >> 8),
             format!("CMP ${:04X},Y @ {:04X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_compare(value);
+
+        if address & 0xFF00 != operator & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 4;
+    }
+
+    fn op_cmp_abs_x(&mut self) {
+        // CMP - Compare Memory With ACC
+        // A - M                             N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute,X    CMP oper,X   DD        3     4*
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+
+        self.trace_opcode(
+            3,
+            format!("DD {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("CMP ${:04X},X @ {:04X} = {:02X}", operator, address, value),
         );
 
         self.acc_compare(value);
