@@ -140,7 +140,7 @@ impl CPU {
                 0x68 => self.op_pla(),
                 0x69 => self.op_adc_imm(),
                 0x6A => self.op_ror_acc(),
-                // 0x6C => self.op_jmp_abs_ind(),
+                0x6C => self.op_jmp_ind(),
                 0x6D => self.op_adc_abs(),
                 0x6E => self.op_ror_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -1505,6 +1505,49 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Carry, c);
 
         self.cycles += 2;
+    }
+
+    fn op_jmp_ind(&mut self) {
+        // JMP - Jump To New Location
+        // (PC+1) -> PCL                    N Z C I D V
+        // (PC+2) -> PCH                    - - - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // indirect      JMP (oper)   6C        3      5
+        //
+        // Edge case: An indirect jump must never use a
+        // vector beginning on the last byte of a page.
+        //
+        // If address $3000 contains $40, $30FF contains
+        // $80, and $3100 contains $50, the result of
+        // JMP ($30FF) will be a transfer of control to
+        // $4080 rather than $5080 as you intended i.e.
+        // the 6502 took the low byte of the address
+        // from $30FF and the high byte from $3000.
+
+        let operand_lo = self.memory_read(self.registers.pc);
+        let operand_hi = self.memory_read(self.registers.pc.wrapping_add(1));
+        let operand = ((operand_hi as u16) << 8) | operand_lo as u16;
+
+        let address_lo = self.memory_read(operand);
+        let address_hi = if operand_lo == 0xFF {
+            // Wrap around the page
+            self.memory_read(operand & 0xFF00)
+        } else {
+            self.memory_read(operand.wrapping_add(1))
+        };
+        let address = ((address_hi as u16) << 8) | address_lo as u16;
+
+        self.trace_opcode(
+            1,
+            format!("6C {:02X} {:02X}", operand_lo, operand_hi),
+            format!("JMP (${:04X}) = {:04X}", operand, address),
+        );
+
+        self.registers.pc = address;
+
+        self.cycles += 5;
     }
 
     fn op_adc_abs(&mut self) {
