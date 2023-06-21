@@ -231,7 +231,7 @@ impl CPU {
                 0xD8 => self.op_cld(),
                 0xD9 => self.op_cmp_abs_y(),
                 0xDD => self.op_cmp_abs_x(),
-                // 0xDE => self.op_dec_abs_x(),
+                0xDE => self.op_dec_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0xE => match opcode {
@@ -3459,6 +3459,36 @@ impl CPU {
         }
 
         self.cycles += 4;
+    }
+
+    fn op_dec_abs_x(&mut self) {
+        // DEC - Decrement Memory By One
+        // M = M - 1                         N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute,X    DEC oper,X   DE        3      7
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+
+        self.trace_opcode(
+            3,
+            format!("DE {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("DEC ${:04X},X @ {:04X} = {:02X}", operator, address, value),
+        );
+
+        let result = value.wrapping_sub(1);
+
+        self.memory_write(address as u16, result);
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 7;
     }
 
     // Opcodes E0-EF
