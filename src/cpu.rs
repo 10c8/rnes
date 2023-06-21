@@ -125,7 +125,7 @@ impl CPU {
                 0x50 => self.op_bvc(),
                 0x51 => self.op_eor_ind_y(),
                 0x55 => self.op_eor_zpg_x(),
-                // 0x56 => self.op_lsr_zpg_x(),
+                0x56 => self.op_lsr_zpg_x(),
                 // 0x58 => self.op_cli(),
                 0x59 => self.op_eor_abs_y(),
                 // 0x5D => self.op_eor_abs_x(),
@@ -342,7 +342,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage      ASL oper      06       2      5
 
-        let (address, mut value) = self.zeropage();
+        let (address, value) = self.zeropage();
 
         self.trace_opcode(
             2,
@@ -350,14 +350,13 @@ impl CPU {
             format!("ASL ${:02X} = {:02X}", address, value),
         );
 
+        let result = value.wrapping_shl(1);
+
+        self.memory_write(address as u16, result);
+
         let c = value & 0x80 != 0;
-
-        value <<= 1;
-
-        self.memory_write(address as u16, value);
-
-        let n = value & 0x80 != 0;
-        let z = value == 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
 
         self.registers.set_status_flag(StatusFlag::Carry, c);
         self.registers.set_status_flag(StatusFlag::Negative, n);
@@ -651,7 +650,7 @@ impl CPU {
 
         let c = value & 0x80 != 0;
 
-        value <<= 1;
+        value = value.wrapping_shl(1);
 
         self.trace_opcode(
             3,
@@ -781,7 +780,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage      ROL oper      26       2      5
 
-        let (address, mut value) = self.zeropage();
+        let (address, value) = self.zeropage();
 
         self.trace_opcode(
             2,
@@ -789,18 +788,17 @@ impl CPU {
             format!("ROL ${:02X} = {:02X}", address, value),
         );
 
-        let c = value & 0x80 != 0;
-
-        value <<= 1;
+        let mut result = value.wrapping_shl(1);
 
         if self.registers.get_status_flag(StatusFlag::Carry) {
-            value |= 0x01;
+            result |= 0x01;
         }
 
-        self.memory_write(address as u16, value);
+        self.memory_write(address as u16, result);
 
-        let n = value & 0x80 != 0;
-        let z = value == 0;
+        let c = value & 0x80 != 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
 
         self.registers.set_status_flag(StatusFlag::Carry, c);
         self.registers.set_status_flag(StatusFlag::Negative, n);
@@ -861,18 +859,18 @@ impl CPU {
 
         self.trace_opcode(1, "2A", "ROL A");
 
-        let mut value = self.registers.a;
-        let c = value & 0x80 != 0;
-        value <<= 1;
+        let mut result = self.registers.a.wrapping_shl(1);
 
         if self.registers.get_status_flag(StatusFlag::Carry) {
-            value |= 0x01;
+            result |= 0x01;
         }
 
-        self.registers.a = value;
+        let c = self.registers.a & 0x80 != 0;
 
-        let n = value & 0x80 != 0;
-        let z = value == 0;
+        self.registers.a = result;
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
 
         self.registers.set_status_flag(StatusFlag::Carry, c);
         self.registers.set_status_flag(StatusFlag::Negative, n);
@@ -940,7 +938,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute      ROL $oper     2E       3      6
 
-        let (address, mut value) = self.absolute();
+        let (address, value) = self.absolute();
 
         self.trace_opcode(
             3,
@@ -948,18 +946,17 @@ impl CPU {
             format!("ROL ${:04X} = {:02X}", address, value),
         );
 
-        let c = value & 0x80 != 0;
-
-        value <<= 1;
+        let mut result = value.wrapping_shl(1);
 
         if self.registers.get_status_flag(StatusFlag::Carry) {
-            value |= 0x01;
+            result |= 0x01;
         }
 
-        self.memory_write(address, value);
+        self.memory_write(address, result);
 
-        let n = value & 0x80 != 0;
-        let z = value == 0;
+        let c = value & 0x80 != 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
 
         self.registers.set_status_flag(StatusFlag::Carry, c);
         self.registers.set_status_flag(StatusFlag::Negative, n);
@@ -1163,7 +1160,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage      LSR oper      46       2      5
 
-        let (address, mut value) = self.zeropage();
+        let (address, value) = self.zeropage();
 
         self.trace_opcode(
             2,
@@ -1171,14 +1168,13 @@ impl CPU {
             format!("LSR ${:02X} = {:02X}", address, value),
         );
 
+        let result = value.wrapping_shr(1);
+
+        self.memory_write(address, result);
+
         let c = value & 0x01 != 0;
-
-        value >>= 1;
-
-        self.memory_write(address, value);
-
-        let n = value & 0x80 != 0;
-        let z = value == 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
 
         self.registers.set_status_flag(StatusFlag::Carry, c);
         self.registers.set_status_flag(StatusFlag::Negative, n);
@@ -1302,7 +1298,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute      LSR oper     4E        3      6
 
-        let (address, mut value) = self.absolute();
+        let (address, value) = self.absolute();
 
         self.trace_opcode(
             3,
@@ -1310,14 +1306,13 @@ impl CPU {
             format!("LSR ${:04X} = {:02X}", address, value),
         );
 
+        let result = value.wrapping_shr(1);
+
+        self.memory_write(address, result);
+
         let c = value & 0x01 != 0;
-
-        value >>= 1;
-
-        self.memory_write(address, value);
-
-        let n = value & 0x80 != 0;
-        let z = value == 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
 
         self.registers.set_status_flag(StatusFlag::Carry, c);
         self.registers.set_status_flag(StatusFlag::Negative, n);
@@ -1398,6 +1393,38 @@ impl CPU {
         self.acc_xor(value);
 
         self.cycles += 4;
+    }
+
+    fn op_lsr_zpg_x(&mut self) {
+        // LSR - Logical Shift Right
+        // 0 -> [76543210] -> C              N Z C I D V
+        //                                   0 + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,X    LSR oper,X   56        2      6
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("56 {:02X}", operator),
+            format!("LSR ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        let result = value.wrapping_shr(1);
+
+        self.memory_write(address as u16, result);
+
+        let c = value & 0x01 != 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 6;
     }
 
     fn op_eor_abs_y(&mut self) {
@@ -1510,7 +1537,7 @@ impl CPU {
 
         let c = value & 0x01 != 0;
 
-        value >>= 1;
+        value = value.wrapping_shr(1);
 
         if self.registers.get_status_flag(StatusFlag::Carry) {
             value |= 0x80;
