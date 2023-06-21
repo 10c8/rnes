@@ -103,7 +103,7 @@ impl CPU {
                 // 0x35 => self.op_and_zpg_x(),
                 // 0x36 => self.op_rol_zpg_x(),
                 0x38 => self.op_sec(),
-                // 0x39 => self.op_and_abs_y(),
+                0x39 => self.op_and_abs_y(),
                 // 0x3D => self.op_and_abs_x(),
                 // 0x3E => self.op_rol_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -605,7 +605,7 @@ impl CPU {
 
         self.acc_or(value);
 
-        if address & 0xFF00 != (address - self.registers.y as u16) & 0xFF00 {
+        if address & 0xFF00 != operator & 0xFF00 {
             self.cycles += 1;
         }
 
@@ -631,7 +631,7 @@ impl CPU {
 
         self.acc_or(value);
 
-        if address & 0xFF00 != (address - self.registers.x as u16) & 0xFF00 {
+        if address & 0xFF00 != operator & 0xFF00 {
             self.cycles += 1;
         }
 
@@ -1034,6 +1034,32 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Carry, true);
 
         self.cycles += 2;
+    }
+
+    fn op_and_abs_y(&mut self) {
+        // AND - AND Memory With ACC
+        // A = A AND M                       N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler     op   bytes cycles
+        // ---------------------------------------------
+        // absolute,Y    AND $oper,Y   39       3     4*
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+
+        self.trace_opcode(
+            3,
+            format!("39 {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("AND ${:04X},Y @ {:04X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_and(value);
+
+        if address & 0xFF00 != operator & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 4;
     }
 
     // Opcodes 40-4F
