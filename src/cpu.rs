@@ -40,12 +40,13 @@ impl CPU {
         // trace!("Entry point: {:#06X}", self.registers.pc);
 
         self.registers.pc = 0xC000; // Nestest.nes automation mode
-
         self.registers.sp = 0xFD;
-        self.registers.p = 0x24;
+
         self.registers.a = 0;
         self.registers.x = 0;
         self.registers.y = 0;
+
+        self.registers.set_status_register(0x24);
 
         self.cycles = 7;
     }
@@ -217,7 +218,7 @@ impl CPU {
                 0xC8 => self.op_iny(),
                 0xC9 => self.op_cmp_imm(),
                 0xCA => self.op_dex(),
-                // 0xCC => self.op_cpy_abs(),
+                0xCC => self.op_cpy_abs(),
                 0xCD => self.op_cmp_abs(),
                 // 0xCE => self.op_dec_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -276,7 +277,7 @@ impl CPU {
 
         self.stack_push_u16(self.registers.pc + 1);
 
-        let p = self.registers.p | 0b0001_0000;
+        let p = self.registers.get_status_register() | 0b0001_0000;
         self.stack_push(p);
 
         self.registers.set_status_flag(StatusFlag::Break, true);
@@ -376,7 +377,7 @@ impl CPU {
 
         self.trace_opcode(1, "08", "PHP");
 
-        let p = self.registers.p | 0b0001_0000;
+        let p = self.registers.get_status_register() | 0b0001_0000;
         self.stack_push(p);
 
         self.cycles += 3;
@@ -453,33 +454,22 @@ impl CPU {
 
     fn op_asl_abs(&mut self) {
         // ASL - Arithmetic Shift Left (Memory)
-        // A = M << 1                        N Z C I D V
+        // M = M << 1                        N Z C I D V
         //                                   + + + - - -
         //
         // addressing    assembler     op   bytes cycles
         // ---------------------------------------------
         // absolute      ASL oper      0E       3      6
 
-        let (address, mut value) = self.absolute();
-
-        let c = value & 0x80 != 0;
-
-        value <<= 1;
+        let (address, value) = self.absolute();
 
         self.trace_opcode(
             3,
-            format!("0E {:02X} {:02X}", address & 0xFF, address >> 8,),
+            format!("0E {:02X} {:02X}", address & 0xFF, address >> 8),
             format!("ASL ${:04X} = {:02X}", address, value),
         );
 
-        self.registers.a = value;
-
-        let n = value & 0x80 != 0;
-        let z = value == 0;
-
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.memory_shl(address, value);
 
         self.cycles += 6;
     }
@@ -560,18 +550,14 @@ impl CPU {
 
     fn op_asl_zpg_x(&mut self) {
         // ASL - Arithmetic Shift Left (Memory)
-        // A = M << 1                        N Z C I D V
+        // M = M << 1                        N Z C I D V
         //                                   + + + - - -
         //
         // addressing    assembler     op   bytes cycles
         // ---------------------------------------------
         // zeropage,X    ASL oper,X    16       2      6
 
-        let (operator, address, mut value) = self.indexed_zeropage(self.registers.x);
-
-        let c = value & 0x80 != 0;
-
-        value <<= 1;
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
 
         self.trace_opcode(
             2,
@@ -579,14 +565,7 @@ impl CPU {
             format!("ASL ${:02X},X @ {:02X} = {:02X}", operator, address, value),
         );
 
-        self.registers.a = value;
-
-        let n = value & 0x80 != 0;
-        let z = value == 0;
-
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.memory_shl(address as u16, value);
 
         self.cycles += 6
     }
@@ -855,8 +834,8 @@ impl CPU {
 
         let p = self.stack_pop();
         let p = p & 0b1100_1111;
-        let p = p | (self.registers.p & 0b0011_0000);
-        self.registers.p = p;
+        let p = p | (self.registers.get_status_register() & 0b0011_0000);
+        self.registers.set_status_register(p);
 
         self.cycles += 4;
     }
@@ -1066,8 +1045,8 @@ impl CPU {
 
         let p = self.stack_pop();
         let p = p & 0b1100_1111;
-        let p = p | (self.registers.p & 0b0011_0000);
-        self.registers.p = p;
+        let p = p | (self.registers.get_status_register() & 0b0011_0000);
+        self.registers.set_status_register(p);
 
         let pc = self.stack_pop_u16();
         self.registers.pc = pc;
@@ -2369,6 +2348,28 @@ impl CPU {
         self.cycles += 2;
     }
 
+    fn op_cpy_abs(&mut self) {
+        // CPY - Compare Memory And Index Y
+        // Y - M                             N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      CPY oper     CC        3      4
+
+        let (address, value) = self.absolute();
+
+        self.trace_opcode(
+            3,
+            format!("CC {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("CPY ${:04X} = {:02X}", address, value),
+        );
+
+        self.index_compare(self.registers.y, value);
+
+        self.cycles += 4;
+    }
+
     fn op_cmp_abs(&mut self) {
         // CMP - Compare Memory With ACC
         // A - M                             N Z C I D V
@@ -2887,6 +2888,20 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Carry, c);
     }
 
+    fn memory_shl(&mut self, address: u16, value: u8) {
+        let result = value.wrapping_shl(1);
+
+        self.memory_write(address, result);
+
+        let c = value & 0x80 != 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+    }
+
     fn x_load(&mut self, value: u8) {
         self.registers.x = value;
 
@@ -2995,7 +3010,7 @@ impl CPU {
             self.registers.a,
             self.registers.x,
             self.registers.y,
-            self.registers.p,
+            self.registers.get_status_register(),
             self.registers.sp,
             self.cycles,
         );
@@ -3017,47 +3032,89 @@ enum StatusFlag {
 }
 
 struct Registers {
+    pub pc: u16,
+    pub sp: u8,
+
     pub a: u8,
     pub x: u8,
     pub y: u8,
-    pub pc: u16,
-    pub sp: u8,
-    pub p: u8,
+
+    pub n: bool,
+    pub v: bool,
+    pub bit_5: bool,
+    pub b: bool,
+    pub d: bool,
+    pub i: bool,
+    pub z: bool,
+    pub c: bool,
 }
 
 impl Registers {
     pub fn new() -> Self {
         Self {
+            pc: 0x0000,
+            sp: 0x0,
+
             a: 0x00,
             x: 0x00,
             y: 0x00,
-            pc: 0x0000,
-            sp: 0x0,
-            p: 0x00,
+
+            n: false,
+            v: false,
+            bit_5: false,
+            b: false,
+            d: false,
+            i: false,
+            z: false,
+            c: false,
         }
+    }
+
+    pub fn get_status_register(&self) -> u8 {
+        let mut p = 0x00;
+        p |= (self.n as u8) << 7;
+        p |= (self.v as u8) << 6;
+        p |= (self.bit_5 as u8) << 5;
+        p |= (self.b as u8) << 4;
+        p |= (self.d as u8) << 3;
+        p |= (self.i as u8) << 2;
+        p |= (self.z as u8) << 1;
+        p |= (self.c as u8) << 0;
+        p
+    }
+
+    pub fn set_status_register(&mut self, value: u8) {
+        self.n = (value >> 7) & 0x01 == 1;
+        self.v = (value >> 6) & 0x01 == 1;
+        self.bit_5 = (value >> 5) & 0x01 == 1;
+        self.b = (value >> 4) & 0x01 == 1;
+        self.d = (value >> 3) & 0x01 == 1;
+        self.i = (value >> 2) & 0x01 == 1;
+        self.z = (value >> 1) & 0x01 == 1;
+        self.c = (value >> 0) & 0x01 == 1;
     }
 
     pub fn get_status_flag(&self, flag: StatusFlag) -> bool {
         match flag {
-            StatusFlag::Negative => self.p & 0b1000_0000 != 0,
-            StatusFlag::Overflow => self.p & 0b0100_0000 != 0,
-            StatusFlag::Break => self.p & 0b0001_0000 != 0,
-            StatusFlag::Decimal => self.p & 0b0000_1000 != 0,
-            StatusFlag::Interrupt => self.p & 0b0000_0100 != 0,
-            StatusFlag::Zero => self.p & 0b0000_0010 != 0,
-            StatusFlag::Carry => self.p & 0b0000_0001 != 0,
+            StatusFlag::Negative => self.n,
+            StatusFlag::Overflow => self.v,
+            StatusFlag::Break => self.b,
+            StatusFlag::Decimal => self.d,
+            StatusFlag::Interrupt => self.i,
+            StatusFlag::Zero => self.z,
+            StatusFlag::Carry => self.c,
         }
     }
 
     pub fn set_status_flag(&mut self, flag: StatusFlag, value: bool) {
         match flag {
-            StatusFlag::Negative => self.p = (self.p & 0b0111_1111) | ((value as u8) << 7),
-            StatusFlag::Overflow => self.p = (self.p & 0b1011_1111) | ((value as u8) << 6),
-            StatusFlag::Break => self.p = (self.p & 0b1110_1111) | ((value as u8) << 4),
-            StatusFlag::Decimal => self.p = (self.p & 0b1111_0111) | ((value as u8) << 3),
-            StatusFlag::Interrupt => self.p = (self.p & 0b1111_1011) | ((value as u8) << 2),
-            StatusFlag::Zero => self.p = (self.p & 0b1111_1101) | ((value as u8) << 1),
-            StatusFlag::Carry => self.p = (self.p & 0b1111_1110) | (value as u8),
+            StatusFlag::Negative => self.n = value,
+            StatusFlag::Overflow => self.v = value,
+            StatusFlag::Break => self.b = value,
+            StatusFlag::Decimal => self.d = value,
+            StatusFlag::Interrupt => self.i = value,
+            StatusFlag::Zero => self.z = value,
+            StatusFlag::Carry => self.c = value,
         }
     }
 }
