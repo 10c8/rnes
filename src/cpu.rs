@@ -200,7 +200,7 @@ impl CPU {
                 0xB1 => self.op_lda_ind_y(),
                 0xB4 => self.op_ldy_zpg_x(),
                 0xB5 => self.op_lda_zpg_x(),
-                // 0xB6 => self.op_ldx_zpg_y(),
+                0xB6 => self.op_ldx_zpg_y(),
                 0xB8 => self.op_clv(),
                 0xB9 => self.op_lda_abs_y(),
                 0xBA => self.op_tsx(),
@@ -2646,6 +2646,28 @@ impl CPU {
         );
 
         self.acc_load(value);
+
+        self.cycles += 4;
+    }
+
+    fn op_ldx_zpg_y(&mut self) {
+        // LDX - Load Index X With Memory
+        // X = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,y    LDX oper,Y   B6        2     4
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.y);
+
+        self.trace_opcode(
+            2,
+            format!("B6 {:02X}", operator),
+            format!("LDX ${:02X},Y @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        self.x_load(value);
 
         self.cycles += 4;
     }
