@@ -172,7 +172,7 @@ impl CPU {
                 0x90 => self.op_bcc(),
                 0x91 => self.op_sta_ind_y(),
                 0x94 => self.op_sty_zpg_x(),
-                // 0x95 => self.op_sta_zpg_x(),
+                0x95 => self.op_sta_zpg_x(),
                 // 0x96 => self.op_stx_zpg_y(),
                 0x98 => self.op_tya(),
                 0x99 => self.op_sta_abs_y(),
@@ -2089,6 +2089,28 @@ impl CPU {
         );
 
         self.memory_write(address as u16, self.registers.y);
+
+        self.cycles += 4;
+    }
+
+    fn op_sta_zpg_x(&mut self) {
+        // STA - Store ACC In Memory
+        // M = A                             N Z C I D V
+        //                                   - - - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,X    STA oper,X   95        2      4
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("95 {:02X}", operator),
+            format!("STA ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        self.memory_write(address as u16, self.registers.a);
 
         self.cycles += 4;
     }
