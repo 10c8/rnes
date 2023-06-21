@@ -205,7 +205,7 @@ impl CPU {
                 0xB9 => self.op_lda_abs_y(),
                 0xBA => self.op_tsx(),
                 0xBC => self.op_ldy_abs_x(),
-                // 0xBD => self.op_lda_abs_x(),
+                0xBD => self.op_lda_abs_x(),
                 // 0xBE => self.op_ldx_abs_y(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
@@ -2850,6 +2850,32 @@ impl CPU {
         );
 
         self.y_load(value);
+
+        if address & 0xFF00 != operator & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 4;
+    }
+
+    fn op_lda_abs_x(&mut self) {
+        // LDA - Load ACC With Memory
+        // A = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute,x    LDA oper,X   BD        3     4*
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+
+        self.trace_opcode(
+            3,
+            format!("BD {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("LDA ${:04X},X @ {:04X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_load(value);
 
         if address & 0xFF00 != operator & 0xFF00 {
             self.cycles += 1;
