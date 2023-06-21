@@ -225,7 +225,7 @@ impl CPU {
             },
             0xD => match opcode {
                 0xD0 => self.op_bne(),
-                // 0xD1 => self.op_cmp_ind_y(),
+                0xD1 => self.op_cmp_ind_y(),
                 // 0xD5 => self.op_cmp_zpg_x(),
                 // 0xD6 => self.op_dec_zpg_x(),
                 0xD8 => self.op_cld(),
@@ -1591,12 +1591,12 @@ impl CPU {
 
     fn op_adc_ind_y(&mut self) {
         // ADC - Add Memory To ACC With Carry
-        // A = A + M + C                      N Z C I D V
-        //                                    + + + - - +
+        // A = A + M + C                     N Z C I D V
+        //                                   + + + - - +
         //
         // addressing    assembler    op    bytes cycles
         // ---------------------------------------------
-        // (indirect),Y  ADC (oper),Y 71        2      5*
+        // (indirect),Y  ADC (oper),Y 71        2     5*
 
         let (operator, base, address, value) = self.post_indexed_indirect();
 
@@ -2568,6 +2568,35 @@ impl CPU {
         self.branch_if(StatusFlag::Zero, false, address);
 
         self.cycles += 2;
+    }
+
+    fn op_cmp_ind_y(&mut self) {
+        // CMP - Compare Memory With ACC
+        // A - M                             N Z C I D V
+        //                                   + + + - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // ind, Y        CMP (oper),Y D1        2     5*
+
+        let (operator, base, address, value) = self.post_indexed_indirect();
+
+        self.trace_opcode(
+            2,
+            format!("D1 {:02X}", operator),
+            format!(
+                "CMP (${:02X}),Y = {:04X} @ {:04X} = {:02X}",
+                operator, base, address, value
+            ),
+        );
+
+        self.acc_compare(value);
+
+        if address & 0xFF00 != base & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 5;
     }
 
     fn op_cld(&mut self) {
