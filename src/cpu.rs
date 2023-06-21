@@ -204,7 +204,7 @@ impl CPU {
                 0xB8 => self.op_clv(),
                 0xB9 => self.op_lda_abs_y(),
                 0xBA => self.op_tsx(),
-                // 0xBC => self.op_ldy_abs_x(),
+                0xBC => self.op_ldy_abs_x(),
                 // 0xBD => self.op_lda_abs_x(),
                 // 0xBE => self.op_ldx_abs_y(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -624,7 +624,7 @@ impl CPU {
 
         self.trace_opcode(
             3,
-            format!("1D {:04X}", operator),
+            format!("1D {:02X} {:02X}", operator & 0xFF, operator >> 8),
             format!("ORA ${:04X},X @ {:04X} = {:02X}", operator, address, value),
         );
 
@@ -2756,6 +2756,32 @@ impl CPU {
         self.registers.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
+    }
+
+    fn op_ldy_abs_x(&mut self) {
+        // LDY - Load Index Y With Memory
+        // Y = M                             N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute,x    LDY oper,X   BC        3     4*
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+
+        self.trace_opcode(
+            3,
+            format!("BC {:02X} {:02X}", operator & 0xFF, operator >> 8),
+            format!("LDY ${:04X},X @ {:04X} = {:02X}", operator, address, value),
+        );
+
+        self.y_load(value);
+
+        if address & 0xFF00 != operator & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 4;
     }
 
     // Opcodes C0-CF
