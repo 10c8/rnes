@@ -171,7 +171,7 @@ impl CPU {
             0x9 => match opcode {
                 0x90 => self.op_bcc(),
                 0x91 => self.op_sta_ind_y(),
-                // 0x94 => self.op_sty_zpg_x(),
+                0x94 => self.op_sty_zpg_x(),
                 // 0x95 => self.op_sta_zpg_x(),
                 // 0x96 => self.op_stx_zpg_y(),
                 0x98 => self.op_tya(),
@@ -2003,6 +2003,28 @@ impl CPU {
         self.memory_write(address, self.registers.a);
 
         self.cycles += 6;
+    }
+
+    fn op_sty_zpg_x(&mut self) {
+        // STY - Store Index Y In Memory
+        // M = Y                             N Z C I D V
+        //                                   - - - - - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,X    STY oper,X   94        2      4
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("94 {:02X}", operator),
+            format!("STY ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        self.memory_write(address as u16, self.registers.y);
+
+        self.cycles += 4;
     }
 
     fn op_tya(&mut self) {
