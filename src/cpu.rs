@@ -100,7 +100,7 @@ impl CPU {
             0x3 => match opcode {
                 0x30 => self.op_bmi(),
                 0x31 => self.op_and_ind_y(),
-                // 0x35 => self.op_and_zpg_x(),
+                0x35 => self.op_and_zpg_x(),
                 // 0x36 => self.op_rol_zpg_x(),
                 0x38 => self.op_sec(),
                 0x39 => self.op_and_abs_y(),
@@ -1018,6 +1018,28 @@ impl CPU {
         }
 
         self.cycles += 5;
+    }
+
+    fn op_and_zpg_x(&mut self) {
+        // AND - AND Memory With ACC
+        // A = A AND M                       N Z C I D V
+        //                                   + + - - - -
+        //
+        // addressing    assembler     op   bytes cycles
+        // ---------------------------------------------
+        // zeropage,X    AND oper,X    35       2     4
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("35 {:02X}", operator),
+            format!("AND ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_and(value);
+
+        self.cycles += 4;
     }
 
     fn op_sec(&mut self) {
