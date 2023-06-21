@@ -101,7 +101,7 @@ impl CPU {
                 0x30 => self.op_bmi(),
                 0x31 => self.op_and_ind_y(),
                 0x35 => self.op_and_zpg_x(),
-                // 0x36 => self.op_rol_zpg_x(),
+                0x36 => self.op_rol_zpg_x(),
                 0x38 => self.op_sec(),
                 0x39 => self.op_and_abs_y(),
                 // 0x3D => self.op_and_abs_x(),
@@ -1037,6 +1037,42 @@ impl CPU {
         self.acc_and(value);
 
         self.cycles += 4;
+    }
+
+    fn op_rol_zpg_x(&mut self) {
+        // ROL - Rotate Left (Memory)
+        // C <- [76543210] <- C              N Z C I D V
+        //                                   + + $ - - -
+        //
+        // addressing    assembler     op   bytes cycles
+        // ---------------------------------------------
+        // zeropage,X    ROL oper,X    36       2     6
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("36 {:02X}", operator),
+            format!("ROL ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        let mut result = value.wrapping_shl(1);
+
+        if self.registers.get_status_flag(StatusFlag::Carry) {
+            result |= 0x01;
+        }
+
+        self.memory_write(address as u16, result);
+
+        let c = value & 0x80 != 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+
+        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.registers.set_status_flag(StatusFlag::Negative, n);
+        self.registers.set_status_flag(StatusFlag::Zero, z);
+
+        self.cycles += 6;
     }
 
     fn op_sec(&mut self) {
