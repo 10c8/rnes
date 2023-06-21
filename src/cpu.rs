@@ -34,12 +34,13 @@ impl CPU {
     }
 
     pub fn reset(&mut self) {
-        // let pc_lo = self.memory_read(0xFFFC);
-        // let pc_hi = self.memory_read(0xFFFD);
-        // self.registers.pc = ((pc_hi as u16) << 8) | pc_lo as u16;
-        // trace!("Entry point: {:#06X}", self.registers.pc);
+        let pc_lo = self.memory_read(0xFFFC);
+        let pc_hi = self.memory_read(0xFFFD);
+        self.registers.pc = ((pc_hi as u16) << 8) | pc_lo as u16;
+        trace!("Entry point: {:#06X}", self.registers.pc);
 
-        self.registers.pc = 0xC000; // Nestest.nes automation mode
+        // self.registers.pc = 0xC000; // Nestest.nes automation mode
+
         self.registers.sp = 0xFD;
 
         self.registers.a = 0;
@@ -63,11 +64,13 @@ impl CPU {
             0x0 => match opcode {
                 0x00 => self.op_brk(),
                 0x01 => self.op_ora_ind_x(),
+                0x04 => self.op_nop_zpg(0),
                 0x05 => self.op_ora_zpg(),
                 0x06 => self.op_asl_zpg(),
                 0x08 => self.op_php(),
                 0x09 => self.op_ora_imm(),
                 0x0A => self.op_asl_acc(),
+                0x0C => self.op_nop_abs(),
                 0x0D => self.op_ora_abs(),
                 0x0E => self.op_asl_abs(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -75,10 +78,13 @@ impl CPU {
             0x1 => match opcode {
                 0x10 => self.op_bpl(),
                 0x11 => self.op_ora_ind_y(),
+                0x14 => self.op_nop_zpg_x(1),
                 0x15 => self.op_ora_zpg_x(),
                 0x16 => self.op_asl_zpg_x(),
                 0x18 => self.op_clc(),
                 0x19 => self.op_ora_abs_y(),
+                0x1A => self.op_nop(1),
+                0x1C => self.op_nop_abs_x(1),
                 0x1D => self.op_ora_abs_x(),
                 0x1E => self.op_asl_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -100,10 +106,13 @@ impl CPU {
             0x3 => match opcode {
                 0x30 => self.op_bmi(),
                 0x31 => self.op_and_ind_y(),
+                0x34 => self.op_nop_zpg_x(3),
                 0x35 => self.op_and_zpg_x(),
                 0x36 => self.op_rol_zpg_x(),
                 0x38 => self.op_sec(),
                 0x39 => self.op_and_abs_y(),
+                0x3A => self.op_nop(3),
+                0x3C => self.op_nop_abs_x(3),
                 0x3D => self.op_and_abs_x(),
                 0x3E => self.op_rol_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -111,6 +120,7 @@ impl CPU {
             0x4 => match opcode {
                 0x40 => self.op_rti(),
                 0x41 => self.op_eor_ind_x(),
+                0x44 => self.op_nop_zpg(4),
                 0x45 => self.op_eor_zpg(),
                 0x46 => self.op_lsr_zpg(),
                 0x48 => self.op_pha(),
@@ -124,10 +134,13 @@ impl CPU {
             0x5 => match opcode {
                 0x50 => self.op_bvc(),
                 0x51 => self.op_eor_ind_y(),
+                0x54 => self.op_nop_zpg_x(5),
                 0x55 => self.op_eor_zpg_x(),
                 0x56 => self.op_lsr_zpg_x(),
-                // 0x58 => self.op_cli(),
+                0x58 => self.op_cli(),
                 0x59 => self.op_eor_abs_y(),
+                0x5A => self.op_nop(5),
+                0x5C => self.op_nop_abs_x(5),
                 0x5D => self.op_eor_abs_x(),
                 0x5E => self.op_lsr_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -135,6 +148,7 @@ impl CPU {
             0x6 => match opcode {
                 0x60 => self.op_rts(),
                 0x61 => self.op_adc_ind_x(),
+                0x64 => self.op_nop_zpg(6),
                 0x65 => self.op_adc_zpg(),
                 0x66 => self.op_ror_zpg(),
                 0x68 => self.op_pla(),
@@ -148,15 +162,19 @@ impl CPU {
             0x7 => match opcode {
                 0x70 => self.op_bvs(),
                 0x71 => self.op_adc_ind_y(),
+                0x74 => self.op_nop_zpg_x(7),
                 0x75 => self.op_adc_zpg_x(),
                 0x76 => self.op_ror_zpg_x(),
                 0x78 => self.op_sei(),
                 0x79 => self.op_adc_abs_y(),
+                0x7A => self.op_nop(7),
+                0x7C => self.op_nop_abs_x(7),
                 0x7D => self.op_adc_abs_x(),
                 0x7E => self.op_ror_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
             },
             0x8 => match opcode {
+                0x80 | 0x82 | 0x89 => self.op_nop_imm(),
                 0x81 => self.op_sta_ind_x(),
                 0x84 => self.op_sty_zpg(),
                 0x85 => self.op_sta_zpg(),
@@ -212,6 +230,7 @@ impl CPU {
             0xC => match opcode {
                 0xC0 => self.op_cpy_imm(),
                 0xC1 => self.op_cmp_ind_x(),
+                0xC2 => self.op_nop_imm(),
                 0xC4 => self.op_cpy_zpg(),
                 0xC5 => self.op_cmp_zpg(),
                 0xC6 => self.op_dec_zpg(),
@@ -226,10 +245,13 @@ impl CPU {
             0xD => match opcode {
                 0xD0 => self.op_bne(),
                 0xD1 => self.op_cmp_ind_y(),
+                0xD4 => self.op_nop_zpg_x(0xD),
                 0xD5 => self.op_cmp_zpg_x(),
                 0xD6 => self.op_dec_zpg_x(),
                 0xD8 => self.op_cld(),
                 0xD9 => self.op_cmp_abs_y(),
+                0xDA => self.op_nop(0xD),
+                0xDC => self.op_nop_abs_x(0xD),
                 0xDD => self.op_cmp_abs_x(),
                 0xDE => self.op_dec_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -237,12 +259,13 @@ impl CPU {
             0xE => match opcode {
                 0xE0 => self.op_cpx_imm(),
                 0xE1 => self.op_sbc_ind_x(),
+                0xE2 => self.op_nop_imm(),
                 0xE4 => self.op_cpx_zpg(),
                 0xE5 => self.op_sbc_zpg(),
                 0xE6 => self.op_inc_zpg(),
                 0xE8 => self.op_inx(),
                 0xE9 => self.op_sbc_imm(),
-                0xEA => self.op_nop(),
+                0xEA => self.op_nop_official(),
                 0xEC => self.op_cpx_abs(),
                 0xED => self.op_sbc_abs(),
                 0xEE => self.op_inc_abs(),
@@ -251,10 +274,13 @@ impl CPU {
             0xF => match opcode {
                 0xF0 => self.op_beq(),
                 0xF1 => self.op_sbc_ind_y(),
+                0xF4 => self.op_nop_zpg_x(0xF),
                 0xF5 => self.op_sbc_zpg_x(),
                 0xF6 => self.op_inc_zpg_x(),
                 0xF8 => self.op_sed(),
                 0xF9 => self.op_sbc_abs_y(),
+                0xFA => self.op_nop(0xF),
+                0xFC => self.op_nop_abs_x(0xF),
                 0xFD => self.op_sbc_abs_x(),
                 0xFE => self.op_inc_abs_x(),
                 _ => panic!("Invalid opcode: {:#04X}", opcode),
@@ -309,6 +335,24 @@ impl CPU {
         self.acc_or(value);
 
         self.cycles += 6;
+    }
+
+    fn op_nop_zpg(&mut self, hi_nibble: u8) {
+        // NOP - No Operation
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage      NOP oper     04       2      3
+
+        let (address, value) = self.zeropage();
+
+        self.trace_opcode(
+            2,
+            format!("{}4 {:02X}", hi_nibble, address),
+            format!("*NOP ${:02X} = {:02X}", address, value),
+        );
+
+        self.cycles += 3;
     }
 
     fn op_ora_zpg(&mut self) {
@@ -429,6 +473,24 @@ impl CPU {
         self.cycles += 2;
     }
 
+    fn op_nop_abs(&mut self) {
+        // NOP - No Operation
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute      NOP oper     0C        3      4
+
+        let (address, value) = self.absolute();
+
+        self.trace_opcode(
+            3,
+            format!("0C {:02X} {:02X}", address & 0xFF, address >> 8),
+            format!("*NOP ${:04X} = {:02X}", address, value),
+        );
+
+        self.cycles += 4;
+    }
+
     fn op_ora_abs(&mut self) {
         // ORA - OR Memory With ACC
         // A = A OR M                        N Z C I D V
@@ -525,6 +587,24 @@ impl CPU {
         self.cycles += 5;
     }
 
+    fn op_nop_zpg_x(&mut self, hi_nibble: u8) {
+        // NOP - No Operation
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,X    NOP oper,X   14        2      4
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("{:X}4 {:02X}", hi_nibble, operator),
+            format!("*NOP ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        self.cycles += 4;
+    }
+
     fn op_ora_zpg_x(&mut self) {
         // ORA - OR Memory With ACC
         // A = A OR M                        N Z C I D V
@@ -603,6 +683,45 @@ impl CPU {
         );
 
         self.acc_or(value);
+
+        if address & 0xFF00 != operator & 0xFF00 {
+            self.cycles += 1;
+        }
+
+        self.cycles += 4;
+    }
+
+    fn op_nop(&mut self, hi_nibble: u8) {
+        // NOP - No Operation
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // implied       NOP          1A        1      2
+
+        self.trace_opcode(1, format!("{:X}A", hi_nibble), "*NOP".to_string());
+
+        self.cycles += 2;
+    }
+
+    fn op_nop_abs_x(&mut self, hi_nibble: u8) {
+        // NOP - No Operation
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // absolute,X    NOP oper,X   1C        3      4*
+
+        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+
+        self.trace_opcode(
+            3,
+            format!(
+                "{:X}C {:02X} {:02X}",
+                hi_nibble,
+                operator & 0xFF,
+                operator >> 8
+            ),
+            format!("*NOP ${:04X},X @ {:04X} = {:02X}", operator, address, value),
+        );
 
         if address & 0xFF00 != operator & 0xFF00 {
             self.cycles += 1;
@@ -1520,6 +1639,22 @@ impl CPU {
         self.cycles += 6;
     }
 
+    fn op_cli(&mut self) {
+        // CLI - Clear Interrupt Disable
+        // I = 0                              N Z C I D V
+        //                                    - - - 0 - -
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // implied       CLI          58        1      2
+
+        self.trace_opcode(1, "58", "CLI");
+
+        self.registers.set_status_flag(StatusFlag::Interrupt, false);
+
+        self.cycles += 2;
+    }
+
     fn op_eor_abs_y(&mut self) {
         // EOR - Exclusive OR
         // A = A XOR M                       N Z C I D V
@@ -2098,6 +2233,26 @@ impl CPU {
     }
 
     // Opcodes 80-8F
+    fn op_nop_imm(&mut self) {
+        // NOP - No Operation
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // immediate     NOP #$oper   80        2      2
+
+        let opcode = self.memory_read(self.registers.pc - 1);
+
+        let address = self.immediate();
+
+        self.trace_opcode(
+            2,
+            format!("{:02X} {:02X}", opcode, address),
+            format!("*NOP #${:02X}", address),
+        );
+
+        self.cycles += 2;
+    }
+
     fn op_sta_ind_x(&mut self) {
         // STA - Store ACC In Memory
         // M = A                             N Z C I D V
@@ -3696,10 +3851,8 @@ impl CPU {
         self.cycles += 2;
     }
 
-    fn op_nop(&mut self) {
+    fn op_nop_official(&mut self) {
         // NOP - No Operation
-        //                                   N Z C I D V
-        //                                   - - - - - -
         //
         // addressing    assembler    op    bytes cycles
         // ---------------------------------------------
