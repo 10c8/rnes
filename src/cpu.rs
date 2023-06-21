@@ -148,7 +148,7 @@ impl CPU {
             0x7 => match opcode {
                 0x70 => self.op_bvs(),
                 0x71 => self.op_adc_ind_y(),
-                // 0x75 => self.op_adc_zpg_x(),
+                0x75 => self.op_adc_zpg_x(),
                 // 0x76 => self.op_ror_zpg_x(),
                 0x78 => self.op_sei(),
                 0x79 => self.op_adc_abs_y(),
@@ -1755,6 +1755,28 @@ impl CPU {
         }
 
         self.cycles += 5;
+    }
+
+    fn op_adc_zpg_x(&mut self) {
+        // ADC - Add Memory To ACC With Carry
+        // A = A + M + C                      N Z C I D V
+        //                                    + + + - - +
+        //
+        // addressing    assembler    op    bytes cycles
+        // ---------------------------------------------
+        // zeropage,X    ADC oper,X   75        2     4
+
+        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+
+        self.trace_opcode(
+            2,
+            format!("75 {:02X}", operator),
+            format!("ADC ${:02X},X @ {:02X} = {:02X}", operator, address, value),
+        );
+
+        self.acc_add(value);
+
+        self.cycles += 4;
     }
 
     fn op_sei(&mut self) {
