@@ -1044,6 +1044,7 @@ impl CPU {
             0x0000..=0x1FFF => self.ram[address as usize],
             0x2000..=0x2007 => match address {
                 0x2002 => self.ppu.read_status(),
+                0x2004 => self.ppu.oam_read(),
                 _ => 0xFF,
             },
             0x2008..=0x3FFF => self.ram[(address - 0x2000) as usize],
