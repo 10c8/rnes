@@ -35,19 +35,11 @@ where
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=resources");
+    println!("cargo:rerun-if-changed=assets");
 
     let target_dir = get_target_dir();
 
     if env::var("PROFILE").unwrap() == "release" {
-        let resources_dir = Path::new("resources");
-        let target_resources_dir = target_dir.join("resources");
-
-        if target_resources_dir.exists() {
-            fs::remove_dir_all(&target_resources_dir).unwrap();
-        }
-
-        fs::create_dir(&target_resources_dir).unwrap();
-        copy_dir(&resources_dir, &target_resources_dir);
+        copy_dir(Path::new("assets"), &target_dir);
     }
 }

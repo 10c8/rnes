@@ -1,5 +1,3 @@
-use std::{fs::File, io::Write};
-
 use log::debug;
 
 use super::Mapper;
@@ -11,7 +9,7 @@ pub struct NROMMapper {
 }
 
 impl NROMMapper {
-    pub fn new(data: &Vec<u8>, rom_bank_count: u8, vrom_bank_count: u8) -> Self {
+    pub fn new(data: &Vec<u8>, rom_bank_count: u8, _vrom_bank_count: u8) -> Self {
         let prg_length = rom_bank_count as usize * 0x4000 + 0x10;
         let rom = data[0x10..prg_length - 1].to_vec();
 
@@ -19,10 +17,6 @@ impl NROMMapper {
 
         let chr_start = rom_bank_count as usize * 0x4000 + 0x10;
         let vrom = data[chr_start..chr_start + 0x2000].to_vec();
-
-        // Dump VROM to a file
-        let mut file = File::create("vrom.bin").unwrap();
-        file.write_all(&vrom).unwrap();
 
         debug!("CHR-ROM length: 8192 bytes");
 

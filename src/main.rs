@@ -39,8 +39,11 @@ fn init(_app: &mut App, gfx: &mut Graphics) -> State {
     info!("Initializing CPU...");
     let mut cpu = CPU::new();
 
-    // info!("Running Tom Harte's CPU tests...");
-    // cpu.run_tomharte_tests();
+    #[cfg(feature = "tom_harte_tests")]
+    {
+        info!("Running Tom Harte's CPU tests...");
+        cpu.run_tomharte_tests();
+    }
 
     info!("Loading cartridge from ROM file...");
     let cart = Cartridge::from_rom_file("resources/roms/games/Donkey Kong (U) (PRG1) [!].nes");
@@ -105,9 +108,10 @@ fn draw(_app: &mut App, gfx: &mut Graphics, plugins: &mut Plugins, state: &mut S
 
     gfx.render(&output);
 
-    // Draw image palette
+    // Draw palettes
     let mut draw = gfx.create_draw();
 
+    let system_palette = state.cpu.ppu.get_system_palette();
     let palettes = [
         state.cpu.ppu.get_image_palette(),
         state.cpu.ppu.get_sprite_palette(),
@@ -119,7 +123,7 @@ fn draw(_app: &mut App, gfx: &mut Graphics, plugins: &mut Plugins, state: &mut S
             let y = 270.0 + (i as f32 * 18.0);
 
             let color_idx = palettes[i][j] as usize;
-            let color_hex = ppu::PALETTE[color_idx] as u32;
+            let color_hex = system_palette[color_idx] as u32;
             let color = Color::from_hex((color_hex << 8) | 0x000000FF);
 
             draw.rect((x, y), (16.0, 16.0)).color(color);

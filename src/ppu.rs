@@ -1,28 +1,16 @@
+use core::panic;
+use std::{fs::File, io::Read};
+
 use crate::cartridge::Cartridge;
 
-// pub const PALETTE: [usize; 64] = [
-//     0x7C7C7C, 0x0000FC, 0x0000BC, 0x4428BC, 0x940084, 0xA80020, 0xA81000, 0x881400, 0x503000,
-//     0x007800, 0x006800, 0x005800, 0x004058, 0x000000, 0x000000, 0x000000, 0xBCBCBC, 0x0078F8,
-//     0x0058F8, 0x6844FC, 0xD800CC, 0xE40058, 0xF83800, 0xE45C10, 0xAC7C00, 0x00B800, 0x00A800,
-//     0x00A844, 0x008888, 0x000000, 0x000000, 0x000000, 0xF8F8F8, 0x3CBCFC, 0x6888FC, 0x9878F8,
-//     0xF878F8, 0xF85898, 0xF87858, 0xFCA044, 0xF8B800, 0xB8F818, 0x58D854, 0x58F898, 0x00E8D8,
-//     0x787878, 0x000000, 0x000000, 0xFCFCFC, 0xA4E4FC, 0xB8B8F8, 0xD8B8F8, 0xF8B8F8, 0xF8A4C0,
-//     0xF0D0B0, 0xFCE0A8, 0xF8D878, 0xD8F878, 0xB8F8B8, 0xB8F8D8, 0x00FCFC, 0xF8D8F8, 0x000000,
-//     0x000000,
-// ];
-
-pub const PALETTE: [usize; 64] = [
-    0x788084, 0x0000FC, 0x0000C4, 0x9C78FC, 0x94008C, 0xAC0028, 0xAC1000, 0x8C1800, 0x503C00,
-    0x007800, 0x006800, 0x005800, 0x004058, 0x000000, 0x000000, 0x000000, 0xBCC0C4, 0x0078FC,
-    0x0058FC, 0x6844FC, 0xD800CC, 0xE40058, 0xF83800, 0xE45C10, 0xAC7C00, 0x00B800, 0x00A800,
-    0x00A844, 0x008888, 0x000000, 0x000000, 0x000000, 0xFCFCFC, 0x3CBCFC, 0x6888FC, 0x9878F8,
-    0xF878F8, 0xF85898, 0xF87858, 0xFCA044, 0xF8B800, 0xB8F818, 0x58D854, 0x58F898, 0x00E8D8,
-    0x787878, 0x000000, 0x000000, 0xFCFCFC, 0xA4E4FC, 0xB8B8F8, 0xD8B8F8, 0xF8B8F8, 0xF8A4C0,
-    0xF0D0B0, 0xFCE0A8, 0xF8D878, 0xD8F878, 0xB8F8B8, 0xB8F8D8, 0x00FCFC, 0xF8D8F8, 0x000000,
-    0x000000,
-];
+enum SpritePriority {
+    Front,
+    Back,
+}
 
 pub struct PPU {
+    system_palette: [usize; 64],
+
     name_table_addr: u8,
     vram_addr_inc: bool,
     spr_table_addr: bool,
@@ -65,7 +53,28 @@ pub struct PPU {
 
 impl PPU {
     pub fn new() -> Self {
+        // Load palette from file
+        let mut palette_file = File::open("./palette.pal").unwrap();
+        let mut palette_data = vec![0; 64 * 3];
+        palette_file
+            .read_exact(&mut palette_data)
+            .map_err(|e| {
+                panic!("Invalid palette file: {}", e);
+            })
+            .unwrap();
+
+        let mut palette: [usize; 64] = [0; 64];
+        for i in 0..palette.len() {
+            let r = palette_data[i * 3 + 0] as usize;
+            let g = palette_data[i * 3 + 1] as usize;
+            let b = palette_data[i * 3 + 2] as usize;
+
+            palette[i] = (r << 16) | (g << 8) | b;
+        }
+
         Self {
+            system_palette: palette,
+
             name_table_addr: 0x00,
             vram_addr_inc: false,
             spr_table_addr: false,
@@ -121,45 +130,9 @@ impl PPU {
             self.scanline += 1;
 
             if self.scanline < 240 {
-                // Draw scanline
-                let row = self.scanline / 8;
-                let table = self.read_name_table_address();
-                let bank = self.read_bg_table_address();
-
-                let image_palette = self.get_image_palette();
-                let sprite_palette = self.get_sprite_palette();
-
-                // Background
-                for col in 0..32 {
-                    let tile_addr = table as usize + (row * 32 + col);
-                    let pattern_id = self.vram[tile_addr];
-                    let pattern_addr = bank | ((pattern_id as u16) << 4);
-
-                    let attr_addr = table as usize + 0x03C0 + (row / 4) * 8 + (col / 4);
-                    let attr = self.vram[attr_addr as usize];
-                    let palette_id = (attr >> (2 * (col % 4 / 2) + 4 * (row % 4 / 2))) & 0x03;
-
-                    let y = self.scanline % 8;
-                    for x in 0..8 {
-                        let color_idx_lo = self.vram[(pattern_addr + y as u16) as usize];
-                        let color_idx_lo = (color_idx_lo >> (7 - x)) & 1;
-                        let color_idx_hi = self.vram[(pattern_addr + y as u16 + 8) as usize];
-                        let color_idx_hi = (color_idx_hi >> (7 - x)) & 1;
-                        let color_idx = (color_idx_hi << 1 | color_idx_lo) as usize;
-
-                        let color_id = image_palette[palette_id as usize * 4 + color_idx];
-                        let color_hex = PALETTE[color_id as usize];
-
-                        let pixel = ((row * 8 + y) * 256 + (col * 8 + x)) as usize;
-
-                        self.framebuffer[pixel * 4] = ((color_hex >> 16) & 0xFF) as u8;
-                        self.framebuffer[pixel * 4 + 1] = ((color_hex >> 8) & 0xFF) as u8;
-                        self.framebuffer[pixel * 4 + 2] = (color_hex & 0xFF) as u8;
-                        self.framebuffer[pixel * 4 + 3] = 255;
-                    }
-                }
-
-                // TODO: Draw sprites
+                self.draw_sprite_scanline(SpritePriority::Back);
+                self.draw_bg_scanline();
+                self.draw_sprite_scanline(SpritePriority::Front);
 
                 self.framebuffer_updated = true;
             } else if self.scanline == 241 {
@@ -178,18 +151,6 @@ impl PPU {
         }
     }
 
-    pub fn get_current_cycle(&self) -> usize {
-        self.current_cycle
-    }
-
-    pub fn get_scanline(&self) -> usize {
-        self.scanline
-    }
-
-    pub fn get_framebuffer(&self) -> &[u8] {
-        &self.framebuffer
-    }
-
     pub fn framebuffer_has_changed(&mut self) -> bool {
         let changed = self.framebuffer_updated;
         if changed {
@@ -197,6 +158,14 @@ impl PPU {
         }
 
         changed
+    }
+
+    pub fn get_framebuffer(&self) -> &[u8] {
+        &self.framebuffer
+    }
+
+    pub fn get_system_palette(&self) -> &[usize] {
+        &self.system_palette
     }
 
     pub fn get_image_palette(&self) -> Vec<u8> {
@@ -300,17 +269,6 @@ impl PPU {
         self.io_bus = (self.io_bus & 0b1110_0000) | (value & 0b0001_1111);
     }
 
-    pub fn vram_read(&mut self) -> u8 {
-        let result = self.read_buffer;
-
-        let vram_inc = if self.vram_addr_inc { 32 } else { 1 };
-
-        self.read_buffer = self.vram[self.vram_addr as usize];
-        self.vram_addr = self.vram_addr.wrapping_add(vram_inc);
-
-        result
-    }
-
     pub fn vram_write(&mut self, data: u8) {
         if self.ignore_vram_writes {
             return;
@@ -322,11 +280,103 @@ impl PPU {
         self.vram_addr = self.vram_addr.wrapping_add(vram_inc);
     }
 
-    pub fn oam_read(&self) -> u8 {
-        self.oam[self.oam_addr as usize]
-    }
-
     pub fn oam_write(&mut self, data: u8) {
         self.oam[self.oam_addr as usize] = data;
+        self.oam_addr = self.oam_addr.wrapping_add(1);
+    }
+
+    fn set_framebuffer_pixel(&mut self, x: usize, y: usize, color: usize) {
+        let offset = (y * 256 + x) * 4;
+        self.framebuffer[offset] = ((color >> 16) & 0xFF) as u8;
+        self.framebuffer[offset + 1] = ((color >> 8) & 0xFF) as u8;
+        self.framebuffer[offset + 2] = (color & 0xFF) as u8;
+        self.framebuffer[offset + 3] = 0xFF;
+    }
+
+    fn draw_bg_scanline(&mut self) {
+        let row = self.scanline / 8;
+
+        let table = self.read_name_table_address();
+        let bank = self.read_bg_table_address();
+        let image_palette = self.get_image_palette();
+
+        for col in 0..32 {
+            let tile_addr = table as usize + (row * 32 + col);
+            let pattern = bank | ((self.vram[tile_addr] as u16) << 4);
+
+            let attr_addr = table as usize + 0x03C0 + (row / 4) * 8 + (col / 4);
+            let attr = self.vram[attr_addr as usize];
+            let palette_id = (attr >> (2 * (col % 4 / 2) + 4 * (row % 4 / 2))) & 0x03;
+
+            let y = self.scanline % 8;
+            for x in 0..8 {
+                let color_idx_lo = self.vram[(pattern + y as u16) as usize];
+                let color_idx_lo = (color_idx_lo >> (7 - x)) & 1;
+                let color_idx_hi = self.vram[(pattern + y as u16 + 8) as usize];
+                let color_idx_hi = (color_idx_hi >> (7 - x)) & 1;
+                let color_idx = (color_idx_hi << 1 | color_idx_lo) as usize;
+
+                let color_id = image_palette[palette_id as usize * 4 + color_idx];
+                let color_hex = self.system_palette[color_id as usize];
+
+                self.set_framebuffer_pixel(col * 8 + x, row * 8 + y, color_hex);
+            }
+        }
+    }
+
+    fn draw_sprite_scanline(&mut self, priority_type: SpritePriority) {
+        if self.scanline == 0 {
+            return;
+        }
+
+        let table = self.read_spr_table_address();
+        let sprite_palette = self.get_sprite_palette();
+
+        for sprite in (0..256).step_by(4).rev() {
+            let attr = self.oam[sprite + 2];
+            let priority = attr & 0b00100000 != 0;
+
+            match priority_type {
+                SpritePriority::Front if priority => {
+                    continue;
+                }
+                SpritePriority::Back if !priority => {
+                    continue;
+                }
+                _ => {}
+            }
+
+            let sprite_x = self.oam[sprite + 3] as usize;
+            let sprite_y = self.oam[sprite] as usize;
+
+            if sprite_y > self.scanline || sprite_y + 8 <= self.scanline || sprite_y >= 0xEF {
+                continue;
+            }
+
+            let pattern_id = self.oam[sprite + 1];
+            let pattern = table as usize + (pattern_id as usize) * 16;
+
+            let palette_id = attr & 0b00000011;
+            let flip_h = (attr & 0b01000000) != 0;
+            let flip_v = (attr & 0b10000000) != 0;
+
+            let y = self.scanline - sprite_y;
+            for x in 0..8 {
+                let color_idx_lo = self.vram[(pattern + y) as usize];
+                let color_idx_lo = (color_idx_lo >> (7 - x)) & 1;
+                let color_idx_hi = self.vram[(pattern + y + 8) as usize];
+                let color_idx_hi = (color_idx_hi >> (7 - x)) & 1;
+                let color_idx = (color_idx_hi << 1 | color_idx_lo) as usize;
+
+                if color_idx != 0 {
+                    let color_id = sprite_palette[palette_id as usize * 4 + color_idx];
+                    let color_hex = self.system_palette[color_id as usize];
+
+                    let x = if flip_h { 7 - x } else { x };
+                    let y = if flip_v { 7 - y } else { y };
+                    self.set_framebuffer_pixel(sprite_x + x, sprite_y + y, color_hex);
+                }
+            }
+        }
     }
 }

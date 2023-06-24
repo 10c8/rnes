@@ -17,6 +17,7 @@ enum StatusFlag {
     Carry,
 }
 
+#[cfg(feature = "tom_harte_tests")]
 #[derive(serde::Deserialize)]
 struct TomHarteTestState {
     pc: u16,
@@ -28,6 +29,7 @@ struct TomHarteTestState {
     ram: Vec<(u16, u8)>,
 }
 
+#[cfg(feature = "tom_harte_tests")]
 #[derive(serde::Deserialize)]
 struct TomHarteTest {
     name: String,
@@ -39,6 +41,7 @@ struct TomHarteTest {
     cycles: usize,
 }
 
+#[cfg(feature = "tom_harte_tests")]
 type TomHarteTestList = Vec<TomHarteTest>;
 
 pub struct CPU {
@@ -68,7 +71,9 @@ pub struct CPU {
 
     trace_log: File,
 
+    #[cfg(feature = "tom_harte_tests")]
     is_tom_harte_test: bool,
+    #[cfg(feature = "tom_harte_tests")]
     tom_harte_memory: [u8; 0x10000],
 }
 
@@ -105,7 +110,9 @@ impl CPU {
 
             trace_log,
 
+            #[cfg(feature = "tom_harte_tests")]
             is_tom_harte_test: false,
+            #[cfg(feature = "tom_harte_tests")]
             tom_harte_memory: [0x00; 0x10000],
         }
     }
@@ -146,7 +153,7 @@ impl CPU {
 
         if self.ppu.nmi_occurred {
             self.ppu.nmi_occurred = false;
-            self.nmi();
+            self.int_nmi();
             return;
         }
 
@@ -379,6 +386,7 @@ impl CPU {
         }
     }
 
+    #[cfg(feature = "tom_harte_tests")]
     pub fn run_tomharte_tests(&mut self) {
         self.is_tom_harte_test = true;
 
@@ -713,23 +721,6 @@ impl CPU {
         }
     }
 
-    fn nmi(&mut self) {
-        self.stack_push_u16(self.pc - 1);
-
-        let status = self.get_status_register();
-        self.stack_push((status & 0b1110_1111) | 0b0010_0000);
-
-        self.set_status_flag(StatusFlag::Interrupt, true);
-
-        self.cycles += 2;
-
-        for _ in 0..6 {
-            self.ppu.cycle();
-        }
-
-        self.pc = self.memory_read_u16(0xFFFA);
-    }
-
     pub fn get_cycles(&self) -> usize {
         self.cycles
     }
@@ -749,6 +740,24 @@ impl CPU {
 
     pub fn get_ppu_framebuffer(&self) -> &[u8] {
         self.ppu.get_framebuffer()
+    }
+
+    // Interrupts
+    fn int_nmi(&mut self) {
+        self.stack_push_u16(self.pc - 1);
+
+        let status = self.get_status_register();
+        self.stack_push((status & 0b1110_1111) | 0b0010_0000);
+
+        self.set_status_flag(StatusFlag::Interrupt, true);
+
+        self.cycles += 2;
+
+        for _ in 0..6 {
+            self.ppu.cycle();
+        }
+
+        self.pc = self.memory_read_u16(0xFFFA);
     }
 
     // Addressing
@@ -1097,11 +1106,30 @@ impl CPU {
                     0x2007 => {
                         self.ppu.vram_write(value);
                     }
-                    _ => {}
+                    _ => unreachable!(),
                 }
             }
             0x2008..=0x3FFF => self.ram[(address - 0x2008) as usize] = value,
-            0x4000..=0x401F => {} // TODO: I/O registers
+            0x4000..=0x4013 => {} // TODO: pAPU registers
+            0x4014 => {
+                // OAM DMA
+                self.ppu.set_oam_address(0);
+
+                let start_address = 0x0100 * value as u16;
+                let end_address = start_address + 255;
+
+                let align = start_address & 0xFF;
+
+                for i in start_address..=end_address {
+                    let data = self.memory_read(i);
+                    self.ppu.oam_write(data);
+                }
+
+                self.cycles += if align == 0 { 513 } else { 514 };
+            }
+            0x4015 => {}          // TODO: pAPU registers
+            0x4016..=0x4017 => {} // TODO: Joypad
+            0x4018..=0x401F => {} // TODO: I/O registers
             0x4020..=0xFFFF => {
                 if let Some(cartridge) = &self.cartridge {
                     cartridge.borrow_mut().write(address, value);
