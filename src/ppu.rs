@@ -133,15 +133,11 @@ impl PPU {
                 for col in 0..32 {
                     let tile_addr = table as usize + (row * 32 + col);
                     let pattern_id = self.vram[tile_addr];
+                    let pattern_addr = bank | ((pattern_id as u16) << 4);
 
                     let attr_addr = table as usize + 0x03C0 + (row / 4) * 8 + (col / 4);
                     let attr = self.vram[attr_addr as usize];
-
-                    let tile_id = ((row / 8) * 32) + (col / 8);
-                    let attr_offset = (((tile_id % 32) / 2 % 2) + (tile_id / 64 % 2) * 2) * 2;
-                    let palette_id = (attr >> attr_offset) & 3;
-
-                    let pattern_addr = bank | ((pattern_id as u16) << 4);
+                    let palette_id = (attr >> (2 * (col % 4 / 2) + 4 * (row % 4 / 2))) & 0x03;
 
                     let y = self.scanline % 8;
                     for x in 0..8 {
