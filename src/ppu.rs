@@ -33,6 +33,7 @@ pub struct PPU {
 
     addr_latch: bool,
 
+    #[allow(dead_code)]
     read_buffer: u8,
 
     io_bus: u8,

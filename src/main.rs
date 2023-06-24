@@ -1,7 +1,6 @@
 mod cartridge;
 mod cpu;
 mod mapper;
-mod memory;
 mod ppu;
 
 use log::info;

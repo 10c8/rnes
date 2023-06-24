@@ -1,9 +1,10 @@
-use std::{
-    cell::RefCell,
-    fs::File,
-    io::{Read, Write},
-    rc::Rc,
-};
+use std::{cell::RefCell, fs::File, rc::Rc};
+
+#[allow(unused_imports)]
+use std::io::Write;
+
+#[cfg(feature = "tom_harte_tests")]
+use std::io::Read;
 
 use crate::{cartridge::Cartridge, ppu::PPU};
 
@@ -69,6 +70,7 @@ pub struct CPU {
     pub ppu: PPU,
     cartridge: Option<Rc<RefCell<Cartridge>>>,
 
+    #[allow(dead_code)]
     trace_log: File,
 
     #[cfg(feature = "tom_harte_tests")]
@@ -1165,6 +1167,7 @@ impl CPU {
     }
 
     // Debugging
+    #[allow(unused_variables)]
     fn trace_opcode<S: Into<String>>(&mut self, pc_offset: u16, opcode: S, disasm: S) {
         // let opcode = opcode.into();
         // let disasm = disasm.into();
