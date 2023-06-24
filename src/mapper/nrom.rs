@@ -9,16 +9,21 @@ pub struct NROMMapper {
 }
 
 impl NROMMapper {
-    pub fn new(data: &Vec<u8>, rom_bank_count: u8, _vrom_bank_count: u8) -> Self {
+    pub fn new(data: &Vec<u8>, rom_bank_count: u8, vrom_bank_count: u8) -> Self {
         let prg_length = rom_bank_count as usize * 0x4000 + 0x10;
         let rom = data[0x10..prg_length - 1].to_vec();
 
         debug!("PRG-ROM length: {} bytes", prg_length);
 
-        let chr_start = rom_bank_count as usize * 0x4000 + 0x10;
-        let vrom = data[chr_start..chr_start + 0x2000].to_vec();
+        let vrom = if vrom_bank_count > 0 {
+            let chr_start = rom_bank_count as usize * 0x4000 + 0x10;
+            debug!("CHR-ROM length: {} bytes", data.len() - chr_start);
 
-        debug!("CHR-ROM length: 8192 bytes");
+            data[chr_start..chr_start + 0x2000].to_vec()
+        } else {
+            debug!("No CHR-ROM found");
+            vec![0; 0x2000]
+        };
 
         Self {
             rom,
