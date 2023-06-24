@@ -143,6 +143,8 @@ impl PPU {
                 if self.nmi_enable {
                     self.nmi_occurred = true;
                 }
+            } else if self.scanline == 261 {
+                self.spr0_hit = false;
             } else if self.scanline == 262 {
                 // End vblank
                 self.vblank = false;
@@ -378,11 +380,31 @@ impl PPU {
                 let color_idx = (color_idx_hi << 1 | color_idx_lo) as usize;
 
                 if color_idx != 0 {
+                    let x = if flip_h { 7 - x } else { x };
+                    let y = if flip_v { 7 - y } else { y };
+
+                    if sprite == 0 && !self.spr0_hit {
+                        let table = self.read_name_table_address();
+                        let bank = self.read_bg_table_address();
+
+                        let bg_tile_addr = table as usize + (y / 8 * 32 + x);
+                        let bg_pattern = bank | ((self.vram[bg_tile_addr] as u16) << 4);
+
+                        let bg_y = y % 8;
+                        let bg_color_idx_lo = self.vram[(bg_pattern + bg_y as u16) as usize];
+                        let bg_color_idx_lo = (bg_color_idx_lo >> (7 - x % 8)) & 1;
+                        let bg_color_idx_hi = self.vram[(bg_pattern + bg_y as u16 + 8) as usize];
+                        let bg_color_idx_hi = (bg_color_idx_hi >> (7 - x % 8)) & 1;
+                        let bg_color_idx = (bg_color_idx_hi << 1 | bg_color_idx_lo) as usize;
+
+                        if bg_color_idx != 0 {
+                            self.spr0_hit = true;
+                        }
+                    }
+
                     let color_id = sprite_palette[palette_id as usize * 4 + color_idx];
                     let color_hex = self.system_palette[color_id as usize];
 
-                    let x = if flip_h { 7 - x } else { x };
-                    let y = if flip_v { 7 - y } else { y };
                     self.set_framebuffer_pixel(sprite_x + x, sprite_y + y, color_hex);
                 }
             }
