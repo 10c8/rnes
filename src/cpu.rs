@@ -1,64 +1,154 @@
-use std::{fs::File, io::Write};
+use std::{
+    cell::RefCell,
+    fs::File,
+    io::{Read, Write},
+    rc::Rc,
+};
 
-use log::trace;
+use crate::{cartridge::Cartridge, ppu::PPU};
 
-use crate::mapper::Mapper;
+enum StatusFlag {
+    Negative,
+    Overflow,
+    Break,
+    Decimal,
+    Interrupt,
+    Zero,
+    Carry,
+}
+
+#[derive(serde::Deserialize)]
+struct TomHarteTestState {
+    pc: u16,
+    s: u8,
+    a: u8,
+    x: u8,
+    y: u8,
+    p: u8,
+    ram: Vec<(u16, u8)>,
+}
+
+#[derive(serde::Deserialize)]
+struct TomHarteTest {
+    name: String,
+    #[serde(rename = "initial")]
+    initial_state: TomHarteTestState,
+    #[serde(rename = "final")]
+    final_state: TomHarteTestState,
+    #[serde(skip_deserializing)]
+    cycles: usize,
+}
+
+type TomHarteTestList = Vec<TomHarteTest>;
 
 pub struct CPU {
-    registers: Registers,
-    memory: Memory,
-    mapper: Option<Box<dyn Mapper>>,
-    cycles: u64,
+    pc: u16,
+    sp: u8,
+
+    a: u8,
+    x: u8,
+    y: u8,
+
+    n: bool,
+    v: bool,
+    bit_5: bool,
+    b: bool,
+    d: bool,
+    i: bool,
+    z: bool,
+    c: bool,
+
+    ram: [u8; 0x4020],
+
+    cycles: usize,
+    last_cycle: usize,
+
+    pub ppu: PPU,
+    cartridge: Option<Rc<RefCell<Cartridge>>>,
 
     trace_log: File,
+
+    is_tom_harte_test: bool,
+    tom_harte_memory: [u8; 0x10000],
 }
 
 impl CPU {
     pub fn new() -> Self {
         let trace_log = File::create("trace.log").unwrap();
 
+        let ppu = PPU::new();
+
         Self {
-            registers: Registers::new(),
-            memory: Memory::new(),
-            mapper: None,
+            pc: 0x0000,
+            sp: 0x0,
+
+            a: 0x00,
+            x: 0x00,
+            y: 0x00,
+
+            n: false,
+            v: false,
+            bit_5: false,
+            b: false,
+            d: false,
+            i: false,
+            z: false,
+            c: false,
+
+            ram: [0x00; 0x4020],
+
             cycles: 0,
+            last_cycle: 0,
+
+            ppu,
+            cartridge: None,
 
             trace_log,
-        }
-    }
 
-    pub fn run(&mut self) {
-        loop {
-            self.cycle();
+            is_tom_harte_test: false,
+            tom_harte_memory: [0x00; 0x10000],
         }
     }
 
     pub fn reset(&mut self) {
         let pc_lo = self.memory_read(0xFFFC);
         let pc_hi = self.memory_read(0xFFFD);
-        self.registers.pc = ((pc_hi as u16) << 8) | pc_lo as u16;
-        trace!("Entry point: {:#06X}", self.registers.pc);
+        self.pc = ((pc_hi as u16) << 8) | pc_lo as u16;
+        log::trace!("Entry point: {:#06X}", self.pc);
 
-        // self.registers.pc = 0xC000; // Nestest.nes automation mode
+        // self.pc = 0xC000; // Nestest.nes automation mode
 
-        self.registers.sp = 0xFD;
+        self.sp = 0xFD;
 
-        self.registers.a = 0;
-        self.registers.x = 0;
-        self.registers.y = 0;
+        self.a = 0;
+        self.x = 0;
+        self.y = 0;
 
-        self.registers.set_status_register(0x24);
+        self.set_status_register(0x24);
 
         self.cycles = 7;
+
+        for _ in 0..self.cycles * 3 {
+            self.run_ppu_cycle();
+        }
     }
 
-    pub fn set_mapper(&mut self, mapper: Box<dyn Mapper>) {
-        self.mapper = Some(mapper);
+    pub fn load_cartridge(&mut self, cartridge: Cartridge) {
+        self.ppu.load_cartridge(&cartridge);
+        self.cartridge = Some(Rc::new(RefCell::new(cartridge)));
     }
 
-    fn cycle(&mut self) {
-        let opcode = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
+    pub fn step(&mut self) {
+        let opcode = self.memory_read(self.pc);
+        self.pc += 1;
+
+        self.last_cycle = self.cycles;
+
+        if self.ppu.nmi_occurred {
+            self.ppu.nmi_occurred = false;
+            self.nmi();
+            return;
+        }
 
         match (opcode & 0xF0) >> 4 {
             0x0 => match opcode {
@@ -289,6 +379,795 @@ impl CPU {
         }
     }
 
+    pub fn run_tomharte_tests(&mut self) {
+        self.is_tom_harte_test = true;
+
+        let test_dir = "./resources/tests/tomharte_v1";
+        let mut opcodes = (0x01..0x07).collect::<Vec<u8>>();
+        opcodes.extend((0x09..0x0F).collect::<Vec<u8>>());
+        opcodes.extend((0x10..0x1F).collect::<Vec<u8>>());
+        opcodes.extend(vec![0x2A, 0x42]);
+        opcodes.extend((0x48..0x4C).collect::<Vec<u8>>());
+        opcodes.push(0x4E);
+        opcodes.extend((0x50..0x5F).collect::<Vec<u8>>());
+        opcodes.extend((0x60..0x6F).collect::<Vec<u8>>());
+        opcodes.extend((0x80..0x8F).collect::<Vec<u8>>());
+        opcodes.extend((0x90..0x97).collect::<Vec<u8>>());
+        opcodes.extend((0x99..0x9F).collect::<Vec<u8>>());
+        opcodes.extend(vec![0xA0, 0xA2, 0xA4, 0xA6]);
+        opcodes.extend((0xA8..0xAC).collect::<Vec<u8>>());
+        opcodes.extend(vec![0xAE, 0xC2, 0xC4, 0xC6, 0xC8]);
+        opcodes.extend((0xCA..0xCC).collect::<Vec<u8>>());
+        opcodes.push(0xCE);
+        opcodes.extend((0xD0..0xDF).collect::<Vec<u8>>());
+        opcodes.extend((0xE0..0xE8).collect::<Vec<u8>>());
+        opcodes.extend((0xEA..0xEF).collect::<Vec<u8>>());
+
+        for opcode in opcodes {
+            let opcode = opcode.rotate_left(4);
+
+            let file = format!("{}/{:02X}.json", test_dir, opcode);
+            let mut file = File::open(file).unwrap();
+            let mut contents = String::new();
+            file.read_to_string(&mut contents).unwrap();
+
+            log::info!("Testing opcode {:02X}...", opcode);
+
+            let tests: TomHarteTestList = serde_json::from_str(&contents).unwrap();
+            for test in tests {
+                // self.tom_harte_memory = [0; 0x10000];
+
+                self.pc = test.initial_state.pc.wrapping_add(1);
+                self.sp = test.initial_state.s;
+                self.a = test.initial_state.a;
+                self.x = test.initial_state.x;
+                self.y = test.initial_state.y;
+                self.set_status_register(test.initial_state.p);
+
+                for (address, value) in test.initial_state.ram {
+                    self.memory_write(address, value);
+                }
+
+                match (opcode & 0xF0) >> 4 {
+                    0x0 => match opcode {
+                        0x00 => self.op_brk(),
+                        0x01 => self.op_ora_ind_x(),
+                        0x04 => self.op_nop_zpg(0),
+                        0x05 => self.op_ora_zpg(),
+                        0x06 => self.op_asl_zpg(),
+                        0x08 => self.op_php(),
+                        0x09 => self.op_ora_imm(),
+                        0x0A => self.op_asl_acc(),
+                        0x0C => self.op_nop_abs(),
+                        0x0D => self.op_ora_abs(),
+                        0x0E => self.op_asl_abs(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0x1 => match opcode {
+                        0x10 => self.op_bpl(),
+                        0x11 => self.op_ora_ind_y(),
+                        0x14 => self.op_nop_zpg_x(1),
+                        0x15 => self.op_ora_zpg_x(),
+                        0x16 => self.op_asl_zpg_x(),
+                        0x18 => self.op_clc(),
+                        0x19 => self.op_ora_abs_y(),
+                        0x1A => self.op_nop(1),
+                        0x1C => self.op_nop_abs_x(1),
+                        0x1D => self.op_ora_abs_x(),
+                        0x1E => self.op_asl_abs_x(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0x2 => match opcode {
+                        0x20 => self.op_jsr(),
+                        0x21 => self.op_and_ind_x(),
+                        0x24 => self.op_bit_zpg(),
+                        0x25 => self.op_and_zpg(),
+                        0x26 => self.op_rol_zpg(),
+                        0x28 => self.op_plp(),
+                        0x29 => self.op_and_imm(),
+                        0x2A => self.op_rol_acc(),
+                        0x2C => self.op_bit_abs(),
+                        0x2D => self.op_and_abs(),
+                        0x2E => self.op_rol_abs(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0x3 => match opcode {
+                        0x30 => self.op_bmi(),
+                        0x31 => self.op_and_ind_y(),
+                        0x34 => self.op_nop_zpg_x(3),
+                        0x35 => self.op_and_zpg_x(),
+                        0x36 => self.op_rol_zpg_x(),
+                        0x38 => self.op_sec(),
+                        0x39 => self.op_and_abs_y(),
+                        0x3A => self.op_nop(3),
+                        0x3C => self.op_nop_abs_x(3),
+                        0x3D => self.op_and_abs_x(),
+                        0x3E => self.op_rol_abs_x(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0x4 => match opcode {
+                        0x40 => self.op_rti(),
+                        0x41 => self.op_eor_ind_x(),
+                        0x44 => self.op_nop_zpg(4),
+                        0x45 => self.op_eor_zpg(),
+                        0x46 => self.op_lsr_zpg(),
+                        0x48 => self.op_pha(),
+                        0x49 => self.op_eor_imm(),
+                        0x4A => self.op_lsr_acc(),
+                        0x4C => self.op_jmp_abs(),
+                        0x4D => self.op_eor_abs(),
+                        0x4E => self.op_lsr_abs(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0x5 => match opcode {
+                        0x50 => self.op_bvc(),
+                        0x51 => self.op_eor_ind_y(),
+                        0x54 => self.op_nop_zpg_x(5),
+                        0x55 => self.op_eor_zpg_x(),
+                        0x56 => self.op_lsr_zpg_x(),
+                        0x58 => self.op_cli(),
+                        0x59 => self.op_eor_abs_y(),
+                        0x5A => self.op_nop(5),
+                        0x5C => self.op_nop_abs_x(5),
+                        0x5D => self.op_eor_abs_x(),
+                        0x5E => self.op_lsr_abs_x(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0x6 => match opcode {
+                        0x60 => self.op_rts(),
+                        0x61 => self.op_adc_ind_x(),
+                        0x64 => self.op_nop_zpg(6),
+                        0x65 => self.op_adc_zpg(),
+                        0x66 => self.op_ror_zpg(),
+                        0x68 => self.op_pla(),
+                        0x69 => self.op_adc_imm(),
+                        0x6A => self.op_ror_acc(),
+                        0x6C => self.op_jmp_ind(),
+                        0x6D => self.op_adc_abs(),
+                        0x6E => self.op_ror_abs(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0x7 => match opcode {
+                        0x70 => self.op_bvs(),
+                        0x71 => self.op_adc_ind_y(),
+                        0x74 => self.op_nop_zpg_x(7),
+                        0x75 => self.op_adc_zpg_x(),
+                        0x76 => self.op_ror_zpg_x(),
+                        0x78 => self.op_sei(),
+                        0x79 => self.op_adc_abs_y(),
+                        0x7A => self.op_nop(7),
+                        0x7C => self.op_nop_abs_x(7),
+                        0x7D => self.op_adc_abs_x(),
+                        0x7E => self.op_ror_abs_x(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0x8 => match opcode {
+                        0x80 | 0x82 | 0x89 => self.op_nop_imm(),
+                        0x81 => self.op_sta_ind_x(),
+                        0x84 => self.op_sty_zpg(),
+                        0x85 => self.op_sta_zpg(),
+                        0x86 => self.op_stx_zpg(),
+                        0x88 => self.op_dey(),
+                        0x8A => self.op_txa(),
+                        0x8C => self.op_sty_abs(),
+                        0x8D => self.op_sta_abs(),
+                        0x8E => self.op_stx_abs(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0x9 => match opcode {
+                        0x90 => self.op_bcc(),
+                        0x91 => self.op_sta_ind_y(),
+                        0x94 => self.op_sty_zpg_x(),
+                        0x95 => self.op_sta_zpg_x(),
+                        0x96 => self.op_stx_zpg_y(),
+                        0x98 => self.op_tya(),
+                        0x99 => self.op_sta_abs_y(),
+                        0x9A => self.op_txs(),
+                        0x9D => self.op_sta_abs_x(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0xA => match opcode {
+                        0xA0 => self.op_ldy_imm(),
+                        0xA1 => self.op_lda_ind_x(),
+                        0xA2 => self.op_ldx_imm(),
+                        0xA4 => self.op_ldy_zpg(),
+                        0xA5 => self.op_lda_zpg(),
+                        0xA6 => self.op_ldx_zpg(),
+                        0xA8 => self.op_tay(),
+                        0xA9 => self.op_lda_imm(),
+                        0xAA => self.op_tax(),
+                        0xAC => self.op_ldy_abs(),
+                        0xAD => self.op_lda_abs(),
+                        0xAE => self.op_ldx_abs(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0xB => match opcode {
+                        0xB0 => self.op_bcs(),
+                        0xB1 => self.op_lda_ind_y(),
+                        0xB4 => self.op_ldy_zpg_x(),
+                        0xB5 => self.op_lda_zpg_x(),
+                        0xB6 => self.op_ldx_zpg_y(),
+                        0xB8 => self.op_clv(),
+                        0xB9 => self.op_lda_abs_y(),
+                        0xBA => self.op_tsx(),
+                        0xBC => self.op_ldy_abs_x(),
+                        0xBD => self.op_lda_abs_x(),
+                        0xBE => self.op_ldx_abs_y(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0xC => match opcode {
+                        0xC0 => self.op_cpy_imm(),
+                        0xC1 => self.op_cmp_ind_x(),
+                        0xC2 => self.op_nop_imm(),
+                        0xC4 => self.op_cpy_zpg(),
+                        0xC5 => self.op_cmp_zpg(),
+                        0xC6 => self.op_dec_zpg(),
+                        0xC8 => self.op_iny(),
+                        0xC9 => self.op_cmp_imm(),
+                        0xCA => self.op_dex(),
+                        0xCC => self.op_cpy_abs(),
+                        0xCD => self.op_cmp_abs(),
+                        0xCE => self.op_dec_abs(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0xD => match opcode {
+                        0xD0 => self.op_bne(),
+                        0xD1 => self.op_cmp_ind_y(),
+                        0xD4 => self.op_nop_zpg_x(0xD),
+                        0xD5 => self.op_cmp_zpg_x(),
+                        0xD6 => self.op_dec_zpg_x(),
+                        0xD8 => self.op_cld(),
+                        0xD9 => self.op_cmp_abs_y(),
+                        0xDA => self.op_nop(0xD),
+                        0xDC => self.op_nop_abs_x(0xD),
+                        0xDD => self.op_cmp_abs_x(),
+                        0xDE => self.op_dec_abs_x(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0xE => match opcode {
+                        0xE0 => self.op_cpx_imm(),
+                        0xE1 => self.op_sbc_ind_x(),
+                        0xE2 => self.op_nop_imm(),
+                        0xE4 => self.op_cpx_zpg(),
+                        0xE5 => self.op_sbc_zpg(),
+                        0xE6 => self.op_inc_zpg(),
+                        0xE8 => self.op_inx(),
+                        0xE9 => self.op_sbc_imm(),
+                        0xEA => self.op_nop_official(),
+                        0xEC => self.op_cpx_abs(),
+                        0xED => self.op_sbc_abs(),
+                        0xEE => self.op_inc_abs(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    0xF => match opcode {
+                        0xF0 => self.op_beq(),
+                        0xF1 => self.op_sbc_ind_y(),
+                        0xF4 => self.op_nop_zpg_x(0xF),
+                        0xF5 => self.op_sbc_zpg_x(),
+                        0xF6 => self.op_inc_zpg_x(),
+                        0xF8 => self.op_sed(),
+                        0xF9 => self.op_sbc_abs_y(),
+                        0xFA => self.op_nop(0xF),
+                        0xFC => self.op_nop_abs_x(0xF),
+                        0xFD => self.op_sbc_abs_x(),
+                        0xFE => self.op_inc_abs_x(),
+                        _ => panic!("Invalid opcode: {:#04X}", opcode),
+                    },
+                    _ => panic!("Invalid opcode: {:#04X}", opcode),
+                }
+
+                if self.pc != test.final_state.pc {
+                    panic!(
+                        "{}  Expected PC: {:04X}, actual PC: {:04X}",
+                        test.name, test.final_state.pc, self.pc
+                    );
+                }
+
+                if self.sp != test.final_state.s {
+                    panic!(
+                        "{}  Expected SP: {:02X}, actual SP: {:02X}",
+                        test.name, test.final_state.s, self.sp
+                    );
+                }
+
+                if self.a != test.final_state.a {
+                    panic!(
+                        "{}  Expected A: {:02X}, actual A: {:02X}",
+                        test.name, test.final_state.a, self.a
+                    );
+                }
+
+                if self.x != test.final_state.x {
+                    panic!(
+                        "{}  Expected X: {:02X}, actual X: {:02X}",
+                        test.name, test.final_state.x, self.x
+                    );
+                }
+
+                if self.y != test.final_state.y {
+                    panic!(
+                        "{}  Expected Y: {:02X}, actual Y: {:02X}",
+                        test.name, test.final_state.y, self.y
+                    );
+                }
+
+                if self.get_status_register() != test.final_state.p {
+                    panic!(
+                        "{}  Expected P: {:02X}, actual P: {:02X}",
+                        test.name,
+                        test.final_state.p,
+                        self.get_status_register()
+                    );
+                }
+
+                for (address, value) in test.final_state.ram {
+                    let read = self.memory_read(address);
+                    if read != value {
+                        panic!(
+                            "{}  Expected RAM[{:04X}]: {:02X}, actual RAM[{:04X}]: {:02X}",
+                            test.name, address, value, address, read
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn nmi(&mut self) {
+        self.stack_push_u16(self.pc - 1);
+
+        let status = self.get_status_register();
+        self.stack_push((status & 0b1110_1111) | 0b0010_0000);
+
+        self.set_status_flag(StatusFlag::Interrupt, true);
+
+        self.cycles += 2;
+
+        for _ in 0..6 {
+            self.ppu.cycle();
+        }
+
+        self.pc = self.memory_read_u16(0xFFFA);
+    }
+
+    pub fn get_cycles(&self) -> usize {
+        self.cycles
+    }
+
+    pub fn get_elapsed_cycles(&self) -> usize {
+        self.cycles - self.last_cycle
+    }
+
+    // PPU
+    pub fn run_ppu_cycle(&mut self) {
+        self.ppu.cycle();
+    }
+
+    pub fn ppu_framebuffer_has_changed(&mut self) -> bool {
+        self.ppu.framebuffer_has_changed()
+    }
+
+    pub fn get_ppu_framebuffer(&self) -> &[u8] {
+        self.ppu.get_framebuffer()
+    }
+
+    // Addressing
+    fn zeropage(&mut self) -> (u16, u8) {
+        let address = self.memory_read(self.pc) as u16;
+        self.pc = self.pc.wrapping_add(1);
+
+        let value = self.memory_read(address);
+
+        (address, value)
+    }
+
+    fn immediate(&mut self) -> u8 {
+        let value = self.memory_read(self.pc);
+        self.pc = self.pc.wrapping_add(1);
+
+        value
+    }
+
+    fn absolute(&mut self) -> (u16, u8) {
+        let address = self.memory_read_u16(self.pc);
+        self.pc = self.pc.wrapping_add(2);
+
+        let value = self.memory_read(address);
+
+        (address, value)
+    }
+
+    fn indexed_absolute(&mut self, index: u8) -> (u16, u16, u8) {
+        let operator = self.memory_read_u16(self.pc);
+        self.pc = self.pc.wrapping_add(2);
+
+        let address = operator.wrapping_add(index as u16);
+
+        let value = self.memory_read(address);
+
+        (operator, address, value)
+    }
+
+    fn indexed_zeropage(&mut self, index: u8) -> (u8, u8, u8) {
+        let operator = self.memory_read(self.pc);
+        self.pc = self.pc.wrapping_add(1);
+
+        let address = operator.wrapping_add(index);
+
+        let value = self.memory_read(address as u16);
+
+        (operator, address, value)
+    }
+
+    fn pre_indexed_indirect(&mut self) -> (u8, u8, u16, u8) {
+        let operator = self.memory_read(self.pc);
+        self.pc = self.pc.wrapping_add(1);
+
+        let indirect = operator.wrapping_add(self.x);
+
+        let address_lo = self.memory_read(indirect as u16) as u16;
+        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
+        let address = (address_hi << 8) | address_lo;
+
+        let value = self.memory_read(address);
+
+        (operator, indirect, address, value)
+    }
+
+    fn post_indexed_indirect(&mut self) -> (u8, u16, u16, u8) {
+        let operator = self.memory_read(self.pc);
+        self.pc = self.pc.wrapping_add(1);
+
+        let base_lo = self.memory_read(operator as u16) as u16;
+        let base_hi = self.memory_read(operator.wrapping_add(1) as u16) as u16;
+        let base = (base_hi << 8) | base_lo;
+
+        let address = base.wrapping_add(self.y as u16);
+
+        let value = self.memory_read(address);
+
+        (operator, base, address, value)
+    }
+
+    fn relative(&mut self) -> (i8, u16) {
+        let offset = self.memory_read(self.pc) as i8;
+        self.pc = self.pc.wrapping_add(1);
+
+        let address = self.pc.wrapping_add_signed(offset as i16);
+
+        (offset, address)
+    }
+
+    // Operations
+    fn acc_load(&mut self, value: u8) {
+        self.a = value;
+
+        let n = self.a & 0x80 != 0;
+        let z = self.a == 0;
+
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+    }
+
+    fn acc_add(&mut self, value: u8) {
+        let a = self.a;
+        let carry = self.get_status_flag(StatusFlag::Carry);
+        let sum = (a as u16) + (value as u16) + (carry as u16);
+        let result = sum as u8;
+
+        self.a = result;
+
+        let n = sum & 0x80 != 0;
+        let z = result == 0;
+        let c = sum > 0xFF;
+        let v = (a ^ result) & ((value ^ result) & 0x80) != 0;
+
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Overflow, v);
+    }
+
+    fn acc_subtract(&mut self, value: u8) {
+        self.acc_add(value ^ 0xFF);
+    }
+
+    fn acc_compare(&mut self, value: u8) {
+        let a = self.a;
+        let result = a.wrapping_sub(value);
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+        let c = a >= value;
+
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+    }
+
+    fn acc_and(&mut self, value: u8) {
+        self.a &= value;
+
+        let n = self.a & 0x80 != 0;
+        let z = self.a == 0;
+
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+    }
+
+    fn acc_or(&mut self, value: u8) {
+        self.a |= value;
+
+        let n = self.a & 0x80 != 0;
+        let z = self.a == 0;
+
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+    }
+
+    fn acc_xor(&mut self, value: u8) {
+        self.a ^= value;
+
+        let n = self.a & 0x80 != 0;
+        let z = self.a == 0;
+
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+    }
+
+    fn index_compare(&mut self, index: u8, value: u8) {
+        let result = index.wrapping_sub(value);
+
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+        let c = index >= value;
+
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+    }
+
+    fn memory_shl(&mut self, address: u16, value: u8) {
+        let result = value.wrapping_shl(1);
+
+        self.memory_write(address, result);
+
+        let c = value & 0x80 != 0;
+        let n = result & 0x80 != 0;
+        let z = result == 0;
+
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+    }
+
+    fn x_load(&mut self, value: u8) {
+        self.x = value;
+
+        let n = value & 0x80 != 0;
+        let z = value == 0;
+
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+    }
+
+    fn y_load(&mut self, value: u8) {
+        self.y = value;
+
+        let n = value & 0x80 != 0;
+        let z = value == 0;
+
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+    }
+
+    // Branching
+    fn branch_if(&mut self, flag: StatusFlag, status: bool, address: u16) {
+        if self.get_status_flag(flag) == status {
+            self.cycles += 1;
+
+            if self.pc & 0xFF00 != address & 0xFF00 {
+                self.cycles += 1;
+            }
+
+            self.pc = address;
+        }
+    }
+
+    // Registers
+    fn get_status_register(&self) -> u8 {
+        let mut p = 0x00;
+        p |= (self.n as u8) << 7;
+        p |= (self.v as u8) << 6;
+        p |= (self.bit_5 as u8) << 5;
+        p |= (self.b as u8) << 4;
+        p |= (self.d as u8) << 3;
+        p |= (self.i as u8) << 2;
+        p |= (self.z as u8) << 1;
+        p |= self.c as u8;
+        p
+    }
+
+    fn set_status_register(&mut self, value: u8) {
+        self.n = value >> 7 == 1;
+        self.v = (value >> 6) & 0x01 == 1;
+        self.bit_5 = (value >> 5) & 0x01 == 1;
+        self.b = (value >> 4) & 0x01 == 1;
+        self.d = (value >> 3) & 0x01 == 1;
+        self.i = (value >> 2) & 0x01 == 1;
+        self.z = (value >> 1) & 0x01 == 1;
+        self.c = (value >> 0) & 0x01 == 1;
+    }
+
+    fn get_status_flag(&self, flag: StatusFlag) -> bool {
+        match flag {
+            StatusFlag::Negative => self.n,
+            StatusFlag::Overflow => self.v,
+            StatusFlag::Break => self.b,
+            StatusFlag::Decimal => self.d,
+            StatusFlag::Interrupt => self.i,
+            StatusFlag::Zero => self.z,
+            StatusFlag::Carry => self.c,
+        }
+    }
+
+    fn set_status_flag(&mut self, flag: StatusFlag, value: bool) {
+        match flag {
+            StatusFlag::Negative => self.n = value,
+            StatusFlag::Overflow => self.v = value,
+            StatusFlag::Break => self.b = value,
+            StatusFlag::Decimal => self.d = value,
+            StatusFlag::Interrupt => self.i = value,
+            StatusFlag::Zero => self.z = value,
+            StatusFlag::Carry => self.c = value,
+        }
+    }
+
+    // Memory
+    fn memory_read(&mut self, address: u16) -> u8 {
+        // if self.is_tom_harte_test {
+        //     return self.tom_harte_memory[address as usize];
+        // }
+
+        match address {
+            0x0000..=0x1FFF => self.ram[address as usize],
+            0x2000..=0x2007 => match address {
+                0x2002 => self.ppu.read_status(),
+                _ => 0xFF,
+            },
+            0x2008..=0x3FFF => self.ram[(address - 0x2000) as usize],
+            0x4000..=0x401F => 0x00, // TODO: I/O registers
+            0x4020..=0xFFFF => {
+                if let Some(cartridge) = &self.cartridge {
+                    cartridge.borrow().read(address)
+                } else {
+                    0x00
+                }
+            }
+        }
+    }
+
+    fn memory_read_u16(&mut self, address: u16) -> u16 {
+        let lo = self.memory_read(address);
+        let hi = self.memory_read(address.wrapping_add(1));
+        ((hi as u16) << 8) | lo as u16
+    }
+
+    fn memory_write(&mut self, address: u16, value: u8) {
+        // if self.is_tom_harte_test {
+        //     self.tom_harte_memory[address as usize] = value;
+        //     return;
+        // }
+
+        match address {
+            0x0000..=0x07FF => {
+                self.ram[address as usize] = value;
+
+                for i in 0..=3 {
+                    self.ram[(address + 0x0800 * i) as usize] = value;
+                }
+            }
+            0x0800..=0x1FFF => self.ram[(address - 0x0800) as usize] = value,
+            0x2000..=0x2007 => {
+                self.ram[address as usize] = value;
+
+                for i in 0..=7 {
+                    self.ram[(address + 0x08 * i) as usize] = value;
+                }
+
+                match address {
+                    0x2000 => {
+                        self.ppu.set_control1(value);
+                    }
+                    0x2001 => {
+                        self.ppu.set_control2(value);
+                    }
+                    0x2003 => {
+                        self.ppu.set_oam_address(value);
+                    }
+                    0x2004 => {
+                        self.ppu.oam_write(value);
+                    }
+                    0x2005 => {
+                        self.ppu.set_scroll(value);
+                    }
+                    0x2006 => {
+                        self.ppu.set_vram_address(value);
+                    }
+                    0x2007 => {
+                        self.ppu.vram_write(value);
+                    }
+                    _ => {}
+                }
+            }
+            0x2008..=0x3FFF => self.ram[(address - 0x2008) as usize] = value,
+            0x4000..=0x401F => {} // TODO: I/O registers
+            0x4020..=0xFFFF => {
+                if let Some(cartridge) = &self.cartridge {
+                    cartridge.borrow_mut().write(address, value);
+                } else {
+                    panic!("No mapper found!");
+                }
+            }
+        }
+    }
+
+    // Stack
+    fn stack_pop(&mut self) -> u8 {
+        self.sp = self.sp.wrapping_add(1);
+        self.memory_read(0x0100 + self.sp as u16)
+    }
+
+    fn stack_pop_u16(&mut self) -> u16 {
+        let lo = self.stack_pop();
+        let hi = self.stack_pop();
+        ((hi as u16) << 8) | lo as u16
+    }
+
+    fn stack_push(&mut self, value: u8) {
+        self.memory_write(0x0100 + self.sp as u16, value);
+        self.sp = self.sp.wrapping_sub(1);
+    }
+
+    fn stack_push_u16(&mut self, value: u16) {
+        let hi = (value >> 8) as u8;
+        self.stack_push(hi);
+        let lo = value as u8;
+        self.stack_push(lo);
+    }
+
+    // Debugging
+    fn trace_opcode<S: Into<String>>(&mut self, pc_offset: u16, opcode: S, disasm: S) {
+        // let opcode = opcode.into();
+        // let disasm = disasm.into();
+        // let ppu_cycle = self.ppu.get_current_cycle();
+        // let ppu_scanline = self.ppu.get_scanline();
+
+        // let line = format!(
+        //     "{:04X}  {}{}{}{}A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} PPU:{}{},{}{} CYC:{}",
+        //     self.pc.wrapping_sub(pc_offset),
+        //     opcode,
+        //     " ".repeat(10 - opcode.len()),
+        //     disasm,
+        //     " ".repeat(32 - disasm.len()),
+        //     self.a,
+        //     self.x,
+        //     self.y,
+        //     self.get_status_register(),
+        //     self.sp,
+        //     " ".repeat(3 - ppu_scanline.to_string().len()),
+        //     ppu_scanline,
+        //     " ".repeat(3 - ppu_cycle.to_string().len()),
+        //     ppu_cycle,
+        //     self.cycles,
+        // );
+
+        // log::trace!("{}", line);
+
+        // self.trace_log.write_all(line.as_bytes()).unwrap();
+        // self.trace_log.write_all(b"\n").unwrap();
+    }
+
     // Opcodes 00-0F
     fn op_brk(&mut self) {
         // BRK - Force Break
@@ -301,13 +1180,13 @@ impl CPU {
 
         self.trace_opcode(1, "00", "BRK");
 
-        self.stack_push_u16(self.registers.pc + 1);
+        self.stack_push_u16(self.pc + 1);
 
-        let p = self.registers.get_status_register() | 0b0001_0000;
+        let p = self.get_status_register() | 0b0001_0000;
         self.stack_push(p);
 
-        self.registers.set_status_flag(StatusFlag::Break, true);
-        self.registers.set_status_flag(StatusFlag::Interrupt, true);
+        self.set_status_flag(StatusFlag::Break, true);
+        self.set_status_flag(StatusFlag::Interrupt, true);
 
         self.cycles += 7;
     }
@@ -402,9 +1281,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 5;
     }
@@ -420,7 +1299,7 @@ impl CPU {
 
         self.trace_opcode(1, "08", "PHP");
 
-        let p = self.registers.get_status_register() | 0b0001_0000;
+        let p = self.get_status_register() | 0b0001_0000;
         self.stack_push(p);
 
         self.cycles += 3;
@@ -459,16 +1338,16 @@ impl CPU {
 
         self.trace_opcode(1, "0A", "ASL A");
 
-        let c = self.registers.a & 0x80 != 0;
+        let c = self.a & 0x80 != 0;
 
-        self.registers.a <<= 1;
+        self.a <<= 1;
 
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
+        let n = self.a & 0x80 != 0;
+        let z = self.a == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
@@ -594,7 +1473,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    NOP oper,X   14        2      4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -614,7 +1493,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    ORA oper,X    15       2     4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -636,7 +1515,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    ASL oper,X    16       2      6
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -660,7 +1539,7 @@ impl CPU {
 
         self.trace_opcode(1, "18", "CLC");
 
-        self.registers.set_status_flag(StatusFlag::Carry, false);
+        self.set_status_flag(StatusFlag::Carry, false);
 
         self.cycles += 2;
     }
@@ -674,7 +1553,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,Y    ORA oper,Y    19       3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+        let (operator, address, value) = self.indexed_absolute(self.y);
 
         self.trace_opcode(
             3,
@@ -710,7 +1589,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    NOP oper,X   1C        3      4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -739,7 +1618,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    ORA $oper,X   1D       3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -765,7 +1644,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    ASL $oper,X   1E       3      7
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -781,9 +1660,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 7;
     }
@@ -798,7 +1677,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute      JSR $oper    20        3      6
 
-        let address = self.memory_read_u16(self.registers.pc);
+        let address = self.memory_read_u16(self.pc);
 
         self.trace_opcode(
             1,
@@ -806,10 +1685,10 @@ impl CPU {
             &format!("JSR ${:04X}", address),
         );
 
-        let pc = self.registers.pc;
+        let pc = self.pc;
         self.stack_push_u16(pc.wrapping_add(1));
 
-        self.registers.pc = address;
+        self.pc = address;
 
         self.cycles += 6;
     }
@@ -858,11 +1737,11 @@ impl CPU {
 
         let n = (value & 0b1000_0000) != 0;
         let v = (value & 0b0100_0000) != 0;
-        let z = (value & self.registers.a) == 0;
+        let z = (value & self.a) == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-        self.registers.set_status_flag(StatusFlag::Overflow, v);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Overflow, v);
 
         self.cycles += 3;
     }
@@ -908,7 +1787,7 @@ impl CPU {
 
         let mut result = value.wrapping_shl(1);
 
-        if self.registers.get_status_flag(StatusFlag::Carry) {
+        if self.get_status_flag(StatusFlag::Carry) {
             result |= 0x01;
         }
 
@@ -918,9 +1797,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 5;
     }
@@ -938,8 +1817,8 @@ impl CPU {
 
         let p = self.stack_pop();
         let p = p & 0b1100_1111;
-        let p = p | (self.registers.get_status_register() & 0b0011_0000);
-        self.registers.set_status_register(p);
+        let p = p | (self.get_status_register() & 0b0011_0000);
+        self.set_status_register(p);
 
         self.cycles += 4;
     }
@@ -977,22 +1856,22 @@ impl CPU {
 
         self.trace_opcode(1, "2A", "ROL A");
 
-        let mut result = self.registers.a.wrapping_shl(1);
+        let mut result = self.a.wrapping_shl(1);
 
-        if self.registers.get_status_flag(StatusFlag::Carry) {
+        if self.get_status_flag(StatusFlag::Carry) {
             result |= 0x01;
         }
 
-        let c = self.registers.a & 0x80 != 0;
+        let c = self.a & 0x80 != 0;
 
-        self.registers.a = result;
+        self.a = result;
 
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
@@ -1016,11 +1895,11 @@ impl CPU {
 
         let n = (value & 0b1000_0000) != 0;
         let v = (value & 0b0100_0000) != 0;
-        let z = (value & self.registers.a) == 0;
+        let z = (value & self.a) == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Overflow, v);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Overflow, v);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 4;
     }
@@ -1066,7 +1945,7 @@ impl CPU {
 
         let mut result = value.wrapping_shl(1);
 
-        if self.registers.get_status_flag(StatusFlag::Carry) {
+        if self.get_status_flag(StatusFlag::Carry) {
             result |= 0x01;
         }
 
@@ -1076,9 +1955,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 6;
     }
@@ -1144,7 +2023,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    AND oper,X    35       2     4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -1166,7 +2045,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    ROL oper,X    36       2     6
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -1176,7 +2055,7 @@ impl CPU {
 
         let mut result = value.wrapping_shl(1);
 
-        if self.registers.get_status_flag(StatusFlag::Carry) {
+        if self.get_status_flag(StatusFlag::Carry) {
             result |= 0x01;
         }
 
@@ -1186,9 +2065,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 6;
     }
@@ -1204,7 +2083,7 @@ impl CPU {
 
         self.trace_opcode(1, "38", "SEC");
 
-        self.registers.set_status_flag(StatusFlag::Carry, true);
+        self.set_status_flag(StatusFlag::Carry, true);
 
         self.cycles += 2;
     }
@@ -1218,7 +2097,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,Y    AND $oper,Y   39       3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+        let (operator, address, value) = self.indexed_absolute(self.y);
 
         self.trace_opcode(
             3,
@@ -1244,7 +2123,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    AND $oper,X   3D       3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -1266,7 +2145,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    ROL oper,X    3E       3     7
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -1276,7 +2155,7 @@ impl CPU {
 
         let mut result = value.wrapping_shl(1);
 
-        if self.registers.get_status_flag(StatusFlag::Carry) {
+        if self.get_status_flag(StatusFlag::Carry) {
             result |= 0x01;
         }
 
@@ -1286,9 +2165,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 7;
     }
@@ -1307,11 +2186,11 @@ impl CPU {
 
         let p = self.stack_pop();
         let p = p & 0b1100_1111;
-        let p = p | (self.registers.get_status_register() & 0b0011_0000);
-        self.registers.set_status_register(p);
+        let p = p | (self.get_status_register() & 0b0011_0000);
+        self.set_status_register(p);
 
         let pc = self.stack_pop_u16();
-        self.registers.pc = pc;
+        self.pc = pc;
 
         self.cycles += 6;
     }
@@ -1388,9 +2267,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 5;
     }
@@ -1406,7 +2285,7 @@ impl CPU {
 
         self.trace_opcode(1, "48", "PHA");
 
-        self.stack_push(self.registers.a);
+        self.stack_push(self.a);
 
         self.cycles += 3;
     }
@@ -1444,15 +2323,15 @@ impl CPU {
 
         self.trace_opcode(1, "4A", "LSR A");
 
-        let c = self.registers.a & 0x01 != 0;
+        let c = self.a & 0x01 != 0;
 
-        self.registers.a >>= 1;
+        self.a >>= 1;
 
-        let z = self.registers.a == 0;
+        let z = self.a == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, false);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, false);
+        self.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
 
         self.cycles += 2;
     }
@@ -1466,7 +2345,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute      JMP oper     4C        3      3
 
-        let address = self.memory_read_u16(self.registers.pc);
+        let address = self.memory_read_u16(self.pc);
 
         self.trace_opcode(
             1,
@@ -1474,7 +2353,7 @@ impl CPU {
             format!("JMP ${:04X}", address),
         );
 
-        self.registers.pc = address;
+        self.pc = address;
 
         self.cycles += 3;
     }
@@ -1526,9 +2405,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 6;
     }
@@ -1594,7 +2473,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    EOR oper,X   55        2     4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -1616,7 +2495,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    LSR oper,X   56        2      6
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -1632,9 +2511,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 6;
     }
@@ -1650,7 +2529,7 @@ impl CPU {
 
         self.trace_opcode(1, "58", "CLI");
 
-        self.registers.set_status_flag(StatusFlag::Interrupt, false);
+        self.set_status_flag(StatusFlag::Interrupt, false);
 
         self.cycles += 2;
     }
@@ -1664,7 +2543,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,Y    EOR oper,Y   59        3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+        let (operator, address, value) = self.indexed_absolute(self.y);
 
         self.trace_opcode(
             3,
@@ -1690,7 +2569,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    EOR oper,X   5D        3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -1716,7 +2595,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    LSR oper,X   5E        3      7
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -1732,9 +2611,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 7;
     }
@@ -1752,7 +2631,7 @@ impl CPU {
         self.trace_opcode(1, "60", "RTS");
 
         let pc = self.stack_pop_u16();
-        self.registers.pc = pc.wrapping_add(1);
+        self.pc = pc.wrapping_add(1);
 
         self.cycles += 6;
     }
@@ -1825,7 +2704,7 @@ impl CPU {
 
         value = value.wrapping_shr(1);
 
-        if self.registers.get_status_flag(StatusFlag::Carry) {
+        if self.get_status_flag(StatusFlag::Carry) {
             value |= 0x80;
         }
 
@@ -1834,9 +2713,9 @@ impl CPU {
         let n = value & 0x80 != 0;
         let z = value == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 5;
     }
@@ -1853,13 +2732,13 @@ impl CPU {
         self.trace_opcode(1, "68", "PLA");
 
         let value = self.stack_pop();
-        self.registers.a = value;
+        self.a = value;
 
         let n = value & 0x80 != 0;
         let z = value == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 4;
     }
@@ -1897,21 +2776,21 @@ impl CPU {
 
         self.trace_opcode(1, "6A", "ROR A");
 
-        let a = self.registers.a;
-        let c = self.registers.get_status_flag(StatusFlag::Carry) as u8;
+        let a = self.a;
+        let c = self.get_status_flag(StatusFlag::Carry) as u8;
 
         let carry = if a & 0x01 != 0 { 1 } else { 0 };
         let result = (a >> 1) | (c << 7);
 
-        self.registers.a = result;
+        self.a = result;
 
         let n = result & 0x80 != 0;
         let z = result == 0;
         let c = carry != 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
 
         self.cycles += 2;
     }
@@ -1935,8 +2814,8 @@ impl CPU {
         // the 6502 took the low byte of the address
         // from $30FF and the high byte from $3000.
 
-        let operator_lo = self.memory_read(self.registers.pc);
-        let operator_hi = self.memory_read(self.registers.pc.wrapping_add(1));
+        let operator_lo = self.memory_read(self.pc);
+        let operator_hi = self.memory_read(self.pc.wrapping_add(1));
         let operator = ((operator_hi as u16) << 8) | operator_lo as u16;
 
         let address_lo = self.memory_read(operator);
@@ -1954,7 +2833,7 @@ impl CPU {
             format!("JMP (${:04X}) = {:04X}", operator, address),
         );
 
-        self.registers.pc = address;
+        self.pc = address;
 
         self.cycles += 5;
     }
@@ -2002,7 +2881,7 @@ impl CPU {
 
         value >>= 1;
 
-        if self.registers.get_status_flag(StatusFlag::Carry) {
+        if self.get_status_flag(StatusFlag::Carry) {
             value |= 0x80;
         }
 
@@ -2011,9 +2890,9 @@ impl CPU {
         let n = value & 0x80 != 0;
         let z = value == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 6;
     }
@@ -2079,7 +2958,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    ADC oper,X   75        2     4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -2101,7 +2980,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    ROR oper,X   76        2      6
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -2111,7 +2990,7 @@ impl CPU {
 
         let mut result = value.wrapping_shr(1);
 
-        if self.registers.get_status_flag(StatusFlag::Carry) {
+        if self.get_status_flag(StatusFlag::Carry) {
             result |= 0x80;
         }
 
@@ -2121,9 +3000,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 6;
     }
@@ -2139,7 +3018,7 @@ impl CPU {
 
         self.trace_opcode(1, "78", "SEI");
 
-        self.registers.set_status_flag(StatusFlag::Interrupt, true);
+        self.set_status_flag(StatusFlag::Interrupt, true);
 
         self.cycles += 2;
     }
@@ -2153,7 +3032,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,Y    ADC oper,Y   79        3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+        let (operator, address, value) = self.indexed_absolute(self.y);
 
         self.trace_opcode(
             3,
@@ -2179,7 +3058,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    ADC oper,X   7D        3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -2205,7 +3084,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    ROR oper,X   7E        3      7
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -2215,7 +3094,7 @@ impl CPU {
 
         let mut result = value.wrapping_shr(1);
 
-        if self.registers.get_status_flag(StatusFlag::Carry) {
+        if self.get_status_flag(StatusFlag::Carry) {
             result |= 0x80;
         }
 
@@ -2225,9 +3104,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 7;
     }
@@ -2240,7 +3119,7 @@ impl CPU {
         // ---------------------------------------------
         // immediate     NOP #$oper   80        2      2
 
-        let opcode = self.memory_read(self.registers.pc - 1);
+        let opcode = self.memory_read(self.pc - 1);
 
         let address = self.immediate();
 
@@ -2273,7 +3152,7 @@ impl CPU {
             ),
         );
 
-        self.memory_write(address, self.registers.a);
+        self.memory_write(address, self.a);
 
         self.cycles += 6;
     }
@@ -2295,7 +3174,7 @@ impl CPU {
             format!("STY ${:02X} = {:02X}", address, initial),
         );
 
-        self.memory_write(address as u16, self.registers.y);
+        self.memory_write(address as u16, self.y);
 
         self.cycles += 3;
     }
@@ -2317,7 +3196,7 @@ impl CPU {
             format!("STA ${:02X} = {:02X}", address, initial),
         );
 
-        self.memory_write(address as u16, self.registers.a);
+        self.memory_write(address as u16, self.a);
 
         self.cycles += 3;
     }
@@ -2339,7 +3218,7 @@ impl CPU {
             format!("STX ${:02X} = {:02X}", address, initial),
         );
 
-        self.memory_write(address as u16, self.registers.x);
+        self.memory_write(address as u16, self.x);
 
         self.cycles += 3;
     }
@@ -2355,13 +3234,13 @@ impl CPU {
 
         self.trace_opcode(1, "88", "DEY");
 
-        self.registers.y = self.registers.y.wrapping_sub(1);
+        self.y = self.y.wrapping_sub(1);
 
-        let n = self.registers.y & 0x80 != 0;
-        let z = self.registers.y == 0;
+        let n = self.y & 0x80 != 0;
+        let z = self.y == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
@@ -2377,13 +3256,13 @@ impl CPU {
 
         self.trace_opcode(1, "8A", "TXA");
 
-        self.registers.a = self.registers.x;
+        self.a = self.x;
 
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
+        let n = self.a & 0x80 != 0;
+        let z = self.a == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
@@ -2405,7 +3284,7 @@ impl CPU {
             format!("STY ${:04X} = {:02X}", address, initial),
         );
 
-        self.memory_write(address, self.registers.y);
+        self.memory_write(address, self.y);
 
         self.cycles += 4;
     }
@@ -2427,7 +3306,7 @@ impl CPU {
             format!("STA ${:04X} = {:02X}", address, initial),
         );
 
-        self.memory_write(address, self.registers.a);
+        self.memory_write(address, self.a);
 
         self.cycles += 4;
     }
@@ -2449,7 +3328,7 @@ impl CPU {
             format!("STX ${:04X} = {:02X}", address, initial),
         );
 
-        self.memory_write(address, self.registers.x);
+        self.memory_write(address, self.x);
 
         self.cycles += 4;
     }
@@ -2493,11 +3372,11 @@ impl CPU {
             format!("91 {:02X}", operator),
             format!(
                 "STA (${:02X}),Y = {:04X} @ {:04X} = {:02X}",
-                operator, address, base, value
+                operator, base, address, value
             ),
         );
 
-        self.memory_write(address, self.registers.a);
+        self.memory_write(address, self.a);
 
         self.cycles += 6;
     }
@@ -2511,7 +3390,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    STY oper,X   94        2      4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -2519,7 +3398,7 @@ impl CPU {
             format!("STY ${:02X},X @ {:02X} = {:02X}", operator, address, value),
         );
 
-        self.memory_write(address as u16, self.registers.y);
+        self.memory_write(address as u16, self.y);
 
         self.cycles += 4;
     }
@@ -2533,7 +3412,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    STA oper,X   95        2      4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -2541,7 +3420,7 @@ impl CPU {
             format!("STA ${:02X},X @ {:02X} = {:02X}", operator, address, value),
         );
 
-        self.memory_write(address as u16, self.registers.a);
+        self.memory_write(address as u16, self.a);
 
         self.cycles += 4;
     }
@@ -2555,7 +3434,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,Y    STX oper,Y   96        2      4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.y);
+        let (operator, address, value) = self.indexed_zeropage(self.y);
 
         self.trace_opcode(
             2,
@@ -2563,7 +3442,7 @@ impl CPU {
             format!("STX ${:02X},Y @ {:02X} = {:02X}", operator, address, value),
         );
 
-        self.memory_write(address as u16, self.registers.x);
+        self.memory_write(address as u16, self.x);
 
         self.cycles += 4;
     }
@@ -2579,13 +3458,13 @@ impl CPU {
 
         self.trace_opcode(1, "98", "TYA");
 
-        self.registers.a = self.registers.y;
+        self.a = self.y;
 
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
+        let n = self.a & 0x80 != 0;
+        let z = self.a == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
@@ -2599,7 +3478,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,Y    STA oper,Y   99        3      5
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+        let (operator, address, value) = self.indexed_absolute(self.y);
 
         self.trace_opcode(
             3,
@@ -2607,7 +3486,7 @@ impl CPU {
             format!("STA ${:04X},Y @ {:04X} = {:02X}", operator, address, value),
         );
 
-        self.memory_write(address, self.registers.a);
+        self.memory_write(address, self.a);
 
         self.cycles += 5;
     }
@@ -2623,7 +3502,7 @@ impl CPU {
 
         self.trace_opcode(1, "9A", "TXS");
 
-        self.registers.sp = self.registers.x;
+        self.sp = self.x;
 
         self.cycles += 2;
     }
@@ -2637,7 +3516,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    STA oper,X   9D        3      5
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -2645,7 +3524,7 @@ impl CPU {
             format!("STA ${:04X},X @ {:04X} = {:02X}", operator, address, value),
         );
 
-        self.memory_write(address, self.registers.a);
+        self.memory_write(address, self.a);
 
         self.cycles += 5;
     }
@@ -2668,13 +3547,13 @@ impl CPU {
             format!("LDY #${:02X}", value),
         );
 
-        self.registers.y = value;
+        self.y = value;
 
-        let n = self.registers.y & 0x80 != 0;
-        let z = self.registers.y == 0;
+        let n = self.y & 0x80 != 0;
+        let z = self.y == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
@@ -2743,13 +3622,13 @@ impl CPU {
             format!("LDY ${:02X} = {:02X}", address, value),
         );
 
-        self.registers.y = value;
+        self.y = value;
 
-        let n = self.registers.y & 0x80 != 0;
-        let z = self.registers.y == 0;
+        let n = self.y & 0x80 != 0;
+        let z = self.y == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 3;
     }
@@ -2809,13 +3688,13 @@ impl CPU {
 
         self.trace_opcode(1, "A8", "TAY");
 
-        self.registers.y = self.registers.a;
+        self.y = self.a;
 
-        let n = self.registers.y & 0x80 != 0;
-        let z = self.registers.y == 0;
+        let n = self.y & 0x80 != 0;
+        let z = self.y == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
@@ -2853,13 +3732,13 @@ impl CPU {
 
         self.trace_opcode(1, "AA", "TAX");
 
-        self.registers.x = self.registers.a;
+        self.x = self.a;
 
-        let n = self.registers.x & 0x80 != 0;
-        let z = self.registers.x == 0;
+        let n = self.x & 0x80 != 0;
+        let z = self.x == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
@@ -2991,7 +3870,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,x    LDY oper,X   B4        2     4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -3013,7 +3892,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,x    LDA oper,X   B5        2      4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -3035,7 +3914,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,y    LDX oper,Y   B6        2     4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.y);
+        let (operator, address, value) = self.indexed_zeropage(self.y);
 
         self.trace_opcode(
             2,
@@ -3059,7 +3938,7 @@ impl CPU {
 
         self.trace_opcode(1, "B8", "CLV");
 
-        self.registers.set_status_flag(StatusFlag::Overflow, false);
+        self.set_status_flag(StatusFlag::Overflow, false);
 
         self.cycles += 2;
     }
@@ -3073,7 +3952,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,y    LDA oper,Y   B9        3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+        let (operator, address, value) = self.indexed_absolute(self.y);
 
         self.trace_opcode(
             3,
@@ -3101,13 +3980,13 @@ impl CPU {
 
         self.trace_opcode(1, "BA", "TSX");
 
-        self.registers.x = self.registers.sp;
+        self.x = self.sp;
 
-        let n = self.registers.x & 0x80 != 0;
-        let z = self.registers.x == 0;
+        let n = self.x & 0x80 != 0;
+        let z = self.x == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
@@ -3121,7 +4000,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,x    LDY oper,X   BC        3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -3147,7 +4026,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,x    LDA oper,X   BD        3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -3173,7 +4052,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,y    LDX oper,Y   BE        3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+        let (operator, address, value) = self.indexed_absolute(self.y);
 
         self.trace_opcode(
             3,
@@ -3208,16 +4087,16 @@ impl CPU {
             format!("CPY #${:02X}", value),
         );
 
-        let y = self.registers.y;
+        let y = self.y;
         let result = y.wrapping_sub(value);
 
         let n = result & 0x80 != 0;
         let z = result == 0;
         let c = y >= value;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
 
         self.cycles += 2;
     }
@@ -3264,7 +4143,7 @@ impl CPU {
             format!("CPY ${:02X} = {:02X}", address, value),
         );
 
-        self.index_compare(self.registers.y, value);
+        self.index_compare(self.y, value);
 
         self.cycles += 3;
     }
@@ -3315,8 +4194,8 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 5;
     }
@@ -3332,13 +4211,13 @@ impl CPU {
 
         self.trace_opcode(1, "C8", "INY");
 
-        self.registers.y = self.registers.y.wrapping_add(1);
+        self.y = self.y.wrapping_add(1);
 
-        let n = self.registers.y & 0x80 != 0;
-        let z = self.registers.y == 0;
+        let n = self.y & 0x80 != 0;
+        let z = self.y == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
@@ -3360,16 +4239,16 @@ impl CPU {
             format!("CMP #${:02X}", value),
         );
 
-        let a = self.registers.a;
+        let a = self.a;
         let result = a.wrapping_sub(value);
 
         let n = result & 0x80 != 0;
         let z = result == 0;
         let c = a >= value;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-        self.registers.set_status_flag(StatusFlag::Carry, c);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Carry, c);
 
         self.cycles += 2;
     }
@@ -3385,13 +4264,13 @@ impl CPU {
 
         self.trace_opcode(1, "CA", "DEX");
 
-        self.registers.x = self.registers.x.wrapping_sub(1);
+        self.x = self.x.wrapping_sub(1);
 
-        let n = self.registers.x & 0x80 != 0;
-        let z = self.registers.x == 0;
+        let n = self.x & 0x80 != 0;
+        let z = self.x == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
@@ -3413,7 +4292,7 @@ impl CPU {
             format!("CPY ${:04X} = {:02X}", address, value),
         );
 
-        self.index_compare(self.registers.y, value);
+        self.index_compare(self.y, value);
 
         self.cycles += 4;
     }
@@ -3464,8 +4343,8 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 6;
     }
@@ -3531,7 +4410,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    CMP oper,X   D5        2     4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -3553,7 +4432,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    DEC oper,X   D6        2     6
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -3568,8 +4447,8 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 6;
     }
@@ -3585,7 +4464,7 @@ impl CPU {
 
         self.trace_opcode(1, "D8", "CLD");
 
-        self.registers.set_status_flag(StatusFlag::Decimal, false);
+        self.set_status_flag(StatusFlag::Decimal, false);
 
         self.cycles += 2;
     }
@@ -3599,7 +4478,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,Y    CMP oper,Y   D9        3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+        let (operator, address, value) = self.indexed_absolute(self.y);
 
         self.trace_opcode(
             3,
@@ -3625,7 +4504,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    CMP oper,X   DD        3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -3651,7 +4530,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    DEC oper,X   DE        3      7
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -3666,8 +4545,8 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 7;
     }
@@ -3690,7 +4569,7 @@ impl CPU {
             format!("CPX #${:02X}", value),
         );
 
-        self.index_compare(self.registers.x, value);
+        self.index_compare(self.x, value);
 
         self.cycles += 2;
     }
@@ -3737,7 +4616,7 @@ impl CPU {
             format!("CPX ${:02X} = {:02X}", address, value),
         );
 
-        self.index_compare(self.registers.x, value);
+        self.index_compare(self.x, value);
 
         self.cycles += 3;
     }
@@ -3788,8 +4667,8 @@ impl CPU {
         let n = value & 0x80 != 0;
         let z = value == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 5;
     }
@@ -3805,13 +4684,13 @@ impl CPU {
 
         self.trace_opcode(1, "E8", "INX");
 
-        self.registers.x = self.registers.x.wrapping_add(1);
+        self.x = self.x.wrapping_add(1);
 
-        let n = self.registers.x & 0x80 != 0;
-        let z = self.registers.x == 0;
+        let n = self.x & 0x80 != 0;
+        let z = self.x == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 2;
     }
@@ -3833,20 +4712,7 @@ impl CPU {
             format!("SBC #${:02X}", value),
         );
 
-        let a = self.registers.a;
-        let c = self.registers.get_status_flag(StatusFlag::Carry) as u8;
-        let result = a.wrapping_sub(value).wrapping_sub(1 - c);
-        self.registers.a = result;
-
-        let n = result & 0x80 != 0;
-        let z = result == 0;
-        let c = a >= value;
-        let v = ((a ^ result) & 0x80 != 0) && ((a ^ value) & 0x80 != 0);
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Overflow, v);
+        self.acc_subtract(value);
 
         self.cycles += 2;
     }
@@ -3880,7 +4746,7 @@ impl CPU {
             format!("CPX ${:04X} = {:02X}", address, value),
         );
 
-        self.index_compare(self.registers.x, value);
+        self.index_compare(self.x, value);
 
         self.cycles += 4;
     }
@@ -3931,8 +4797,8 @@ impl CPU {
         let n = value & 0x80 != 0;
         let z = value == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 6;
     }
@@ -3998,7 +4864,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    SBC oper,X   F5        2     4
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -4020,7 +4886,7 @@ impl CPU {
         // ---------------------------------------------
         // zeropage,X    INC oper,X   F6        2     6
 
-        let (operator, address, value) = self.indexed_zeropage(self.registers.x);
+        let (operator, address, value) = self.indexed_zeropage(self.x);
 
         self.trace_opcode(
             2,
@@ -4035,8 +4901,8 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 6;
     }
@@ -4052,7 +4918,7 @@ impl CPU {
 
         self.trace_opcode(1, "F8", "SED");
 
-        self.registers.set_status_flag(StatusFlag::Decimal, true);
+        self.set_status_flag(StatusFlag::Decimal, true);
 
         self.cycles += 2;
     }
@@ -4066,7 +4932,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,Y    SBC oper,Y   F9        3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.y);
+        let (operator, address, value) = self.indexed_absolute(self.y);
 
         self.trace_opcode(
             3,
@@ -4092,7 +4958,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    SBC oper,X   FD        3     4*
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -4118,7 +4984,7 @@ impl CPU {
         // ---------------------------------------------
         // absolute,X    INC oper,X   FE        3     7
 
-        let (operator, address, value) = self.indexed_absolute(self.registers.x);
+        let (operator, address, value) = self.indexed_absolute(self.x);
 
         self.trace_opcode(
             3,
@@ -4133,472 +4999,9 @@ impl CPU {
         let n = result & 0x80 != 0;
         let z = result == 0;
 
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
+        self.set_status_flag(StatusFlag::Negative, n);
+        self.set_status_flag(StatusFlag::Zero, z);
 
         self.cycles += 7;
-    }
-
-    // Addressing
-    fn zeropage(&mut self) -> (u16, u8) {
-        let address = self.memory_read(self.registers.pc) as u16;
-        self.registers.pc += 1;
-
-        let value = self.memory_read(address);
-
-        (address, value)
-    }
-
-    fn immediate(&mut self) -> u8 {
-        let value = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        value
-    }
-
-    fn absolute(&mut self) -> (u16, u8) {
-        let address = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
-
-        let value = self.memory_read(address);
-
-        (address, value)
-    }
-
-    fn indexed_absolute(&mut self, index: u8) -> (u16, u16, u8) {
-        let operator = self.memory_read_u16(self.registers.pc);
-        self.registers.pc += 2;
-
-        let address = operator.wrapping_add(index as u16);
-
-        let value = self.memory_read(address);
-
-        (operator, address, value)
-    }
-
-    fn indexed_zeropage(&mut self, index: u8) -> (u8, u8, u8) {
-        let operator = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let address = operator.wrapping_add(index);
-
-        let value = self.memory_read(address as u16);
-
-        (operator, address, value)
-    }
-
-    fn pre_indexed_indirect(&mut self) -> (u8, u8, u16, u8) {
-        let operator = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let indirect = operator.wrapping_add(self.registers.x);
-
-        let address_lo = self.memory_read(indirect as u16) as u16;
-        let address_hi = self.memory_read(indirect.wrapping_add(1) as u16) as u16;
-        let address = (address_hi << 8) | address_lo;
-
-        let value = self.memory_read(address);
-
-        (operator, indirect, address, value)
-    }
-
-    fn post_indexed_indirect(&mut self) -> (u8, u16, u16, u8) {
-        let operator = self.memory_read(self.registers.pc);
-        self.registers.pc += 1;
-
-        let base_lo = self.memory_read(operator as u16) as u16;
-        let base_hi = self.memory_read(operator.wrapping_add(1) as u16) as u16;
-        let base = (base_hi << 8) | base_lo;
-
-        let address = base.wrapping_add(self.registers.y as u16);
-
-        let value = self.memory_read(address);
-
-        (operator, base, address, value)
-    }
-
-    fn relative(&mut self) -> (i8, u16) {
-        let offset = self.memory_read(self.registers.pc) as i8;
-        self.registers.pc += 1;
-
-        let address = if offset.is_negative() {
-            self.registers.pc.wrapping_sub(offset.wrapping_abs() as u16)
-        } else {
-            self.registers.pc.wrapping_add(offset as u16)
-        };
-
-        (offset, address)
-    }
-
-    // Operations
-    fn acc_load(&mut self, value: u8) {
-        self.registers.a = value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-    }
-
-    fn acc_add(&mut self, value: u8) {
-        let a = self.registers.a;
-        let carry = self.registers.get_status_flag(StatusFlag::Carry) as u8;
-        let result = a.wrapping_add(value).wrapping_add(carry);
-
-        self.registers.a = result;
-
-        let n = result & 0x80 != 0;
-        let z = result == 0;
-        let c = result < a;
-        let v = (a ^ result) & ((value ^ result) & 0x80) != 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Overflow, v);
-    }
-
-    fn acc_subtract(&mut self, value: u8) {
-        let a = self.registers.a;
-        let borrow = !self.registers.get_status_flag(StatusFlag::Carry) as u8;
-
-        let result = a.wrapping_sub(value).wrapping_sub(borrow);
-
-        self.registers.a = result;
-
-        let n = result & 0x80 != 0;
-        let z = result == 0;
-        let c = a >= value;
-        let v = (a & 0x80) != (value & 0x80) && (a & 0x80) != (result & 0x80);
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Overflow, v);
-    }
-
-    fn acc_compare(&mut self, value: u8) {
-        let a = self.registers.a;
-        let result = a.wrapping_sub(value);
-
-        let n = result & 0x80 != 0;
-        let z = result == 0;
-        let c = a >= value;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-    }
-
-    fn acc_and(&mut self, value: u8) {
-        self.registers.a &= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-    }
-
-    fn acc_or(&mut self, value: u8) {
-        self.registers.a |= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-    }
-
-    fn acc_xor(&mut self, value: u8) {
-        self.registers.a ^= value;
-
-        let n = self.registers.a & 0x80 != 0;
-        let z = self.registers.a == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-    }
-
-    fn index_compare(&mut self, index: u8, value: u8) {
-        let result = index.wrapping_sub(value);
-
-        let n = result & 0x80 != 0;
-        let z = result == 0;
-        let c = index >= value;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-    }
-
-    fn memory_shl(&mut self, address: u16, value: u8) {
-        let result = value.wrapping_shl(1);
-
-        self.memory_write(address, result);
-
-        let c = value & 0x80 != 0;
-        let n = result & 0x80 != 0;
-        let z = result == 0;
-
-        self.registers.set_status_flag(StatusFlag::Carry, c);
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-    }
-
-    fn x_load(&mut self, value: u8) {
-        self.registers.x = value;
-
-        let n = value & 0x80 != 0;
-        let z = value == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-    }
-
-    fn y_load(&mut self, value: u8) {
-        self.registers.y = value;
-
-        let n = value & 0x80 != 0;
-        let z = value == 0;
-
-        self.registers.set_status_flag(StatusFlag::Negative, n);
-        self.registers.set_status_flag(StatusFlag::Zero, z);
-    }
-
-    // Branching
-    fn branch_if(&mut self, flag: StatusFlag, status: bool, address: u16) {
-        if self.registers.get_status_flag(flag) == status {
-            self.cycles += 1;
-
-            if self.registers.pc & 0xFF00 != address & 0xFF00 {
-                self.cycles += 1;
-            }
-
-            self.registers.pc = address;
-        }
-    }
-
-    // Memory
-    fn memory_read(&self, address: u16) -> u8 {
-        match address {
-            0x0000..=0x401F => self.memory.read(address),
-            0x4020..=0xFFFF => {
-                if let Some(mapper) = self.mapper.as_ref() {
-                    mapper.read(address)
-                } else {
-                    0x00
-                }
-            }
-        }
-    }
-
-    fn memory_read_u16(&self, address: u16) -> u16 {
-        let lo = self.memory_read(address);
-        let hi = self.memory_read(address + 1);
-        ((hi as u16) << 8) | lo as u16
-    }
-
-    fn memory_write(&mut self, address: u16, value: u8) {
-        match address {
-            0x0000..=0x401F => self.memory.write(address, value),
-            0x4020..=0xFFFF => {
-                if let Some(mapper) = self.mapper.as_mut() {
-                    mapper.write(address, value);
-                } else {
-                    panic!("No mapper found!");
-                }
-            }
-        }
-    }
-
-    fn stack_pop(&mut self) -> u8 {
-        self.registers.sp = self.registers.sp.wrapping_add(1);
-        self.memory_read(0x0100 + self.registers.sp as u16)
-    }
-
-    fn stack_pop_u16(&mut self) -> u16 {
-        let lo = self.stack_pop();
-        let hi = self.stack_pop();
-        ((hi as u16) << 8) | lo as u16
-    }
-
-    fn stack_push(&mut self, value: u8) {
-        self.memory_write(0x0100 + self.registers.sp as u16, value);
-        self.registers.sp = self.registers.sp.wrapping_sub(1);
-    }
-
-    fn stack_push_u16(&mut self, value: u16) {
-        let hi = (value >> 8) as u8;
-        self.stack_push(hi);
-        let lo = value as u8;
-        self.stack_push(lo);
-    }
-
-    fn trace_opcode<S: Into<String>>(&mut self, pc_offset: u16, opcode: S, disasm: S) {
-        let opcode = opcode.into();
-        let disasm = disasm.into();
-
-        let line = format!(
-            "{:04X}  {}{}{}{}A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} CYC:{}",
-            self.registers.pc - pc_offset,
-            opcode,
-            " ".repeat(10 - opcode.len()),
-            disasm,
-            " ".repeat(32 - disasm.len()),
-            self.registers.a,
-            self.registers.x,
-            self.registers.y,
-            self.registers.get_status_register(),
-            self.registers.sp,
-            self.cycles,
-        );
-
-        // trace!("{}", line);
-
-        self.trace_log.write_all(line.as_bytes()).unwrap();
-        self.trace_log.write_all(b"\n").unwrap();
-    }
-}
-
-enum StatusFlag {
-    Negative,
-    Overflow,
-    Break,
-    Decimal,
-    Interrupt,
-    Zero,
-    Carry,
-}
-
-struct Registers {
-    pub pc: u16,
-    pub sp: u8,
-
-    pub a: u8,
-    pub x: u8,
-    pub y: u8,
-
-    pub n: bool,
-    pub v: bool,
-    pub bit_5: bool,
-    pub b: bool,
-    pub d: bool,
-    pub i: bool,
-    pub z: bool,
-    pub c: bool,
-}
-
-impl Registers {
-    pub fn new() -> Self {
-        Self {
-            pc: 0x0000,
-            sp: 0x0,
-
-            a: 0x00,
-            x: 0x00,
-            y: 0x00,
-
-            n: false,
-            v: false,
-            bit_5: false,
-            b: false,
-            d: false,
-            i: false,
-            z: false,
-            c: false,
-        }
-    }
-
-    pub fn get_status_register(&self) -> u8 {
-        let mut p = 0x00;
-        p |= (self.n as u8) << 7;
-        p |= (self.v as u8) << 6;
-        p |= (self.bit_5 as u8) << 5;
-        p |= (self.b as u8) << 4;
-        p |= (self.d as u8) << 3;
-        p |= (self.i as u8) << 2;
-        p |= (self.z as u8) << 1;
-        p |= (self.c as u8) << 0;
-        p
-    }
-
-    pub fn set_status_register(&mut self, value: u8) {
-        self.n = (value >> 7) & 0x01 == 1;
-        self.v = (value >> 6) & 0x01 == 1;
-        self.bit_5 = (value >> 5) & 0x01 == 1;
-        self.b = (value >> 4) & 0x01 == 1;
-        self.d = (value >> 3) & 0x01 == 1;
-        self.i = (value >> 2) & 0x01 == 1;
-        self.z = (value >> 1) & 0x01 == 1;
-        self.c = (value >> 0) & 0x01 == 1;
-    }
-
-    pub fn get_status_flag(&self, flag: StatusFlag) -> bool {
-        match flag {
-            StatusFlag::Negative => self.n,
-            StatusFlag::Overflow => self.v,
-            StatusFlag::Break => self.b,
-            StatusFlag::Decimal => self.d,
-            StatusFlag::Interrupt => self.i,
-            StatusFlag::Zero => self.z,
-            StatusFlag::Carry => self.c,
-        }
-    }
-
-    pub fn set_status_flag(&mut self, flag: StatusFlag, value: bool) {
-        match flag {
-            StatusFlag::Negative => self.n = value,
-            StatusFlag::Overflow => self.v = value,
-            StatusFlag::Break => self.b = value,
-            StatusFlag::Decimal => self.d = value,
-            StatusFlag::Interrupt => self.i = value,
-            StatusFlag::Zero => self.z = value,
-            StatusFlag::Carry => self.c = value,
-        }
-    }
-}
-
-struct Memory {
-    ram: [u8; 0x4020],
-}
-
-impl Memory {
-    pub fn new() -> Self {
-        Self {
-            ram: [0x00; 0x4020],
-        }
-    }
-
-    pub fn read(&self, address: u16) -> u8 {
-        match address {
-            0x0000..=0x1FFF => self.ram[address as usize],
-            0x2000..=0x2007 => 0x00, // TODO: I/O registers
-            0x2008..=0x3FFF => self.ram[(address - 0x2000) as usize],
-            _ => panic!("Invalid memory read address: 0x{:04X}", address),
-        }
-    }
-
-    pub fn write(&mut self, address: u16, value: u8) {
-        match address {
-            0x0000..=0x07FF => {
-                self.ram[address as usize] = value;
-
-                for i in 0..=3 {
-                    self.ram[(address + 0x0800 * i) as usize] = value;
-                }
-            }
-            0x0800..=0x1FFF => self.ram[(address - 0x0800) as usize] = value,
-            0x2000..=0x2007 => {
-                self.ram[address as usize] = value;
-
-                for i in 0..=7 {
-                    self.ram[(address + 0x08 * i) as usize] = value;
-                }
-            }
-            0x2008..=0x3FFF => self.ram[(address - 0x2008) as usize] = value,
-            _ => panic!("Invalid memory write address: 0x{:04X}", address),
-        }
     }
 }

@@ -2,6 +2,8 @@ use std::{fs::File, io::Read};
 
 use log::debug;
 
+use crate::mapper::{nrom, Mapper};
+
 const MAGIC_ADDR: u8 = 0x00;
 const MAGIC_LEN: usize = 4;
 const MAGIC_BYTES: [u8; MAGIC_LEN] = [0x4E, 0x45, 0x53, 0x1A];
@@ -28,7 +30,7 @@ pub struct Cartridge {
     pub has_trainer: bool,
     pub mapper_number: u8,
     pub ram_bank_count: u8,
-    data: Vec<u8>,
+    pub mapper: Box<dyn Mapper>,
 }
 
 impl Cartridge {
@@ -57,11 +59,13 @@ impl Cartridge {
         if rom_ctrl1 & 0b0000_1000 != 0 {
             mirror_mode = MirrorMode::FourScreen;
         }
-        let mut mapper_number = rom_ctrl1 & 0b1111_0000;
+        let mapper_number_lo = rom_ctrl1 & 0b1111_0000;
 
         let rom_ctrl2 = data[ROM_CTRL2_ADDR as usize];
-        mapper_number |= rom_ctrl2 & 0b1111_0000;
+        let mapper_number_hi = rom_ctrl2 & 0b1111_0000;
         let ram_bank_count = data[RAM_BANK_COUNT_ADDR as usize];
+
+        let mapper_number = (mapper_number_lo >> 4) | mapper_number_hi;
 
         debug!("Mapper number: {}", mapper_number);
         debug!("Mirror mode: {:?}", mirror_mode);
@@ -73,6 +77,15 @@ impl Cartridge {
             if has_battery_backed_ram { "Yes" } else { "No" }
         );
 
+        let mapper: Box<dyn Mapper> = match mapper_number {
+            0 => Box::new(nrom::NROMMapper::new(
+                &data,
+                rom_bank_count,
+                vrom_bank_count,
+            )),
+            _ => panic!("Unsupported mapper type: {}", mapper_number),
+        };
+
         Self {
             is_magic_valid,
             magic_bytes: magic_bytes.to_vec(),
@@ -83,24 +96,15 @@ impl Cartridge {
             has_trainer,
             mapper_number,
             ram_bank_count,
-            data,
+            mapper,
         }
     }
 
-    pub fn get_prg_rom(&self) -> &[u8] {
-        let length = self.rom_bank_count as usize * 0x4000 + 0x10;
-
-        debug!("PRG-ROM length: {} bytes", length);
-
-        &self.data[0x10..length - 1]
+    pub fn read(&self, address: u16) -> u8 {
+        self.mapper.read(address)
     }
 
-    pub fn get_chr_rom(&self) -> &[u8] {
-        let start = self.rom_bank_count as usize * 0x4000 + 0x10;
-        let length = self.vrom_bank_count as usize * 0x2000;
-
-        debug!("CHR-ROM length: {} bytes", length);
-
-        &self.data[start..start + length - 1]
+    pub fn write(&mut self, address: u16, value: u8) {
+        self.mapper.write(address, value);
     }
 }

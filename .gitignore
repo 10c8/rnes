@@ -1,6 +1,8 @@
 /debugger
 /target
+/resources/roms
 
 *.log
 *.cdl
 *.deb
+*.bin
