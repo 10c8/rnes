@@ -22,8 +22,8 @@ pub struct PPU {
     monochrome: bool,
     clip_bg: bool,
     clip_spr: bool,
-    hide_bg: bool,
-    hide_spr: bool,
+    show_bg: bool,
+    show_spr: bool,
     color_emphasis: u8,
 
     ignore_vram_writes: bool,
@@ -87,8 +87,8 @@ impl PPU {
             monochrome: false,
             clip_bg: false,
             clip_spr: false,
-            hide_bg: false,
-            hide_spr: false,
+            show_bg: false,
+            show_spr: false,
             color_emphasis: 0x00,
 
             ignore_vram_writes: false,
@@ -243,8 +243,8 @@ impl PPU {
         self.monochrome = value & 0b0000_0001 != 0;
         self.clip_bg = value & 0b0000_0010 != 0;
         self.clip_spr = value & 0b0000_0100 != 0;
-        self.hide_bg = value & 0b0000_1000 != 0;
-        self.hide_spr = value & 0b0001_0000 != 0;
+        self.show_bg = value & 0b0000_1000 != 0;
+        self.show_spr = value & 0b0001_0000 != 0;
         self.color_emphasis = value & 0b1110_0000;
 
         self.io_bus = (self.io_bus & 0b0001_1111) | (value & 0b1110_0000);
@@ -281,6 +281,10 @@ impl PPU {
         self.vram_addr = self.vram_addr.wrapping_add(vram_inc);
     }
 
+    pub fn oam_read(&self) -> u8 {
+        self.oam[self.oam_addr as usize]
+    }
+
     pub fn oam_write(&mut self, data: u8) {
         self.oam[self.oam_addr as usize] = data;
         self.oam_addr = self.oam_addr.wrapping_add(1);
@@ -295,6 +299,10 @@ impl PPU {
     }
 
     fn draw_bg_scanline(&mut self) {
+        if !self.show_bg {
+            return;
+        }
+
         let row = self.scanline / 8;
 
         let table = self.read_name_table_address();
@@ -326,7 +334,7 @@ impl PPU {
     }
 
     fn draw_sprite_scanline(&mut self, priority_type: SpritePriority) {
-        if self.scanline == 0 {
+        if self.scanline == 0 || !self.show_spr {
             return;
         }
 
