@@ -1036,15 +1036,17 @@ impl CPU {
 
     // Memory
     fn memory_read(&mut self, address: u16) -> u8 {
-        // if self.is_tom_harte_test {
-        //     return self.tom_harte_memory[address as usize];
-        // }
+        #[cfg(feature = "tom_harte_test")]
+        if self.is_tom_harte_test {
+            return self.tom_harte_memory[address as usize];
+        }
 
         match address {
             0x0000..=0x1FFF => self.ram[address as usize],
             0x2000..=0x2007 => match address {
                 0x2002 => self.ppu.read_status(),
                 0x2004 => self.ppu.oam_read(),
+                0x2007 => self.ppu.vram_read(),
                 _ => 0xFF,
             },
             0x2008..=0x3FFF => self.ram[(address - 0x2000) as usize],
@@ -1066,10 +1068,11 @@ impl CPU {
     }
 
     fn memory_write(&mut self, address: u16, value: u8) {
-        // if self.is_tom_harte_test {
-        //     self.tom_harte_memory[address as usize] = value;
-        //     return;
-        // }
+        #[cfg(feature = "tom_harte_test")]
+        if self.is_tom_harte_test {
+            self.tom_harte_memory[address as usize] = value;
+            return;
+        }
 
         match address {
             0x0000..=0x07FF => {
