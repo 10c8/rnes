@@ -1,7 +1,7 @@
 use core::panic;
 use std::{fs::File, io::Read};
 
-use crate::cartridge::Cartridge;
+use crate::cartridge::{Cartridge, MirrorMode};
 
 enum SpritePriority {
     Front,
@@ -31,12 +31,13 @@ pub struct PPU {
     spr0_hit: bool,
     vblank: bool,
 
+    mirror_mode: MirrorMode,
+    scroll_x: u8,
+    scroll_y: u8,
+
     addr_latch: bool,
 
-    #[allow(dead_code)]
-    read_buffer: u8,
-
-    io_bus: u8,
+    data_buffer: u8,
 
     oam_addr: u8,
     oam: Vec<u8>,
@@ -49,7 +50,7 @@ pub struct PPU {
 
     pub nmi_occurred: bool,
     current_cycle: usize,
-    scanline: usize,
+    scanline: isize,
 }
 
 impl PPU {
@@ -96,11 +97,13 @@ impl PPU {
             spr0_hit: false,
             vblank: false,
 
+            mirror_mode: MirrorMode::Horizontal,
+            scroll_x: 0,
+            scroll_y: 0,
+
             addr_latch: false,
 
-            read_buffer: 0,
-
-            io_bus: 0,
+            data_buffer: 0,
 
             oam_addr: 0,
             oam: vec![0; 0x100],
@@ -113,7 +116,7 @@ impl PPU {
 
             nmi_occurred: false,
             current_cycle: 0,
-            scanline: 0,
+            scanline: -1,
         }
     }
 
@@ -121,37 +124,75 @@ impl PPU {
         let vrom = cartridge.mapper.get_vrom().to_vec();
         let bank_count = cartridge.mapper.get_vrom_bank_count();
         self.vram[0x0000..0x2000 * bank_count].copy_from_slice(&vrom);
+
+        self.mirror_mode = cartridge.mirror_mode.clone();
     }
 
     pub fn cycle(&mut self) {
+        if self.scanline >= -1 && self.scanline < 240 {
+            if self.scanline == 0 && self.current_cycle == 0 {
+                self.current_cycle = 1;
+            }
+
+            if self.scanline == -1 && self.current_cycle == 1 {
+                self.vblank = false;
+                self.framebuffer_updated = true;
+            }
+        }
+
+        if self.scanline == 241 && self.current_cycle == 1 {
+            self.vblank = true;
+
+            if self.nmi_enable {
+                self.nmi_occurred = true;
+            }
+        }
+
+        if self.scanline > -1 && self.scanline < 240 && self.current_cycle == 1 {
+            self.draw_sprite_scanline(SpritePriority::Back);
+            self.draw_bg_scanline();
+            self.draw_sprite_scanline(SpritePriority::Front);
+        }
+
         self.current_cycle += 1;
 
-        if self.current_cycle == 341 {
+        if self.current_cycle >= 341 {
             self.current_cycle = 0;
             self.scanline += 1;
 
-            if self.scanline < 240 {
-                self.draw_sprite_scanline(SpritePriority::Back);
-                self.draw_bg_scanline();
-                self.draw_sprite_scanline(SpritePriority::Front);
-
-                self.framebuffer_updated = true;
-            } else if self.scanline == 241 {
-                // Trigger vblank
-                self.vblank = true;
-
-                if self.nmi_enable {
-                    self.nmi_occurred = true;
-                }
-            } else if self.scanline == 261 {
+            if self.scanline >= 261 {
+                self.scanline = -1;
                 self.spr0_hit = false;
-            } else if self.scanline == 262 {
-                // End vblank
-                self.vblank = false;
-                self.nmi_occurred = false;
-                self.scanline = 0;
             }
         }
+
+        // self.current_cycle += 1;
+
+        // if self.current_cycle == 341 {
+        //     self.current_cycle = 0;
+        //     self.scanline += 1;
+
+        //     if self.scanline < 240 {
+        //         self.draw_sprite_scanline(SpritePriority::Back);
+        //         self.draw_bg_scanline();
+        //         self.draw_sprite_scanline(SpritePriority::Front);
+        //     } else if self.scanline == 241 {
+        //         // Trigger vblank
+        //         self.vblank = true;
+        //         self.framebuffer_updated = true;
+
+        //         if self.nmi_enable {
+        //             self.nmi_occurred = true;
+        //         }
+        //     } else if self.scanline == 261 {
+        //         self.spr0_hit = false;
+        //     } else if self.scanline == 262 {
+        //         // End vblank
+        //         self.vblank = false;
+        //         self.nmi_occurred = false;
+        //         self.scanline = 0;
+        //     }
+        // }
     }
 
     pub fn framebuffer_has_changed(&mut self) -> bool {
@@ -226,7 +267,7 @@ impl PPU {
 
         self.vblank = false;
 
-        status | (self.io_bus & 0b0001_1111)
+        status | (self.data_buffer & 0b0001_1111)
     }
 
     pub fn set_control1(&mut self, value: u8) {
@@ -237,8 +278,6 @@ impl PPU {
         self.spr_size = value & 0b0010_0000 != 0;
         self.ppu_master_slave = value & 0b0100_0000 != 0;
         self.nmi_enable = value & 0b1000_0000 != 0;
-
-        self.io_bus = (self.io_bus & 0b1110_0000) | (value & 0b0001_1111);
     }
 
     pub fn set_control2(&mut self, value: u8) {
@@ -248,28 +287,46 @@ impl PPU {
         self.show_bg = value & 0b0000_1000 != 0;
         self.show_spr = value & 0b0001_0000 != 0;
         self.color_emphasis = value & 0b1110_0000;
-
-        self.io_bus = (self.io_bus & 0b0001_1111) | (value & 0b1110_0000);
     }
 
     pub fn set_scroll(&mut self, value: u8) {
-        self.io_bus = (self.io_bus & 0b1110_0000) | (value & 0b0001_1111);
+        if self.addr_latch {
+            self.scroll_y = value;
+        } else {
+            self.scroll_x = value;
+        }
+
+        self.addr_latch = !self.addr_latch;
     }
 
     pub fn set_vram_address(&mut self, value: u8) {
         if self.addr_latch {
             self.vram_addr = (self.vram_addr & 0xFF00) | value as u16;
         } else {
-            self.vram_addr = (self.vram_addr & 0x00FF) | ((value as u16) << 8);
+            self.vram_addr = (self.vram_addr & 0x00FF) | ((value as u16 & 0x3F) << 8);
         }
 
         self.addr_latch = !self.addr_latch;
-        self.io_bus = (self.io_bus & 0b1110_0000) | (value & 0b0001_1111);
     }
 
     pub fn set_oam_address(&mut self, value: u8) {
         self.oam_addr = value;
-        self.io_bus = (self.io_bus & 0b1110_0000) | (value & 0b0001_1111);
+    }
+
+    pub fn vram_read(&mut self) -> u8 {
+        // let mut result = self.data_buffer;
+        // self.data_buffer = self.vram[self.vram_addr as usize];
+
+        // if self.vram_addr >= 0x3F00 {
+        //     result = self.data_buffer;
+        // }
+
+        // let vram_inc = if self.vram_addr_inc { 32 } else { 1 };
+        // self.vram_addr = self.vram_addr.wrapping_add(vram_inc);
+
+        // result
+
+        self.vram[self.vram_addr as usize]
     }
 
     pub fn vram_write(&mut self, data: u8) {
@@ -277,9 +334,9 @@ impl PPU {
             return;
         }
 
-        let vram_inc = if self.vram_addr_inc { 32 } else { 1 };
-
         self.vram[self.vram_addr as usize] = data;
+
+        let vram_inc = if self.vram_addr_inc { 32 } else { 1 };
         self.vram_addr = self.vram_addr.wrapping_add(vram_inc);
     }
 
@@ -290,6 +347,19 @@ impl PPU {
     pub fn oam_write(&mut self, data: u8) {
         self.oam[self.oam_addr as usize] = data;
         self.oam_addr = self.oam_addr.wrapping_add(1);
+    }
+
+    fn read_mirrored_vram(&mut self, address: u16) -> u8 {
+        let idx = address & 0b10111111111111;
+        let address = match (&self.mirror_mode, idx / 0x400) {
+            (MirrorMode::Vertical, 2) | (MirrorMode::Vertical, 3) => idx - 0x800,
+            (MirrorMode::Horizontal, 2) => idx - 0x400,
+            (MirrorMode::Horizontal, 1) => idx - 0x400,
+            (MirrorMode::Horizontal, 3) => idx - 0x800,
+            _ => idx,
+        };
+
+        self.vram[address as usize]
     }
 
     fn set_framebuffer_pixel(&mut self, x: usize, y: usize, color: usize) {
@@ -305,21 +375,68 @@ impl PPU {
             return;
         }
 
-        let row = self.scanline / 8;
+        let table = self.read_name_table_address();
+        let (left_offset, right_offset) = match (&self.mirror_mode, table) {
+            (MirrorMode::Vertical, 0x2000)
+            | (MirrorMode::Vertical, 0x2800)
+            | (MirrorMode::Horizontal, 0x2000)
+            | (MirrorMode::Horizontal, 0x2400) => (0, 0x0400),
+            (MirrorMode::Vertical, 0x2400)
+            | (MirrorMode::Vertical, 0x2C00)
+            | (MirrorMode::Horizontal, 0x2800)
+            | (MirrorMode::Horizontal, 0x2C00) => (0x0400, 0),
+            (_, _) => {
+                panic!("Unsupported mirroring mode: {:?}", self.mirror_mode);
+            }
+        };
+
+        self.draw_name_table(
+            left_offset,
+            (0, 0, 256, 240),
+            (self.scroll_x as isize).wrapping_neg(),
+            (self.scroll_y as isize).wrapping_neg(),
+        );
+
+        if self.scroll_x > 0 {
+            self.draw_name_table(
+                right_offset,
+                (0, 0, self.scroll_x as usize, 240),
+                256 - self.scroll_x as isize,
+                0,
+            );
+        } else if self.scroll_y > 0 {
+            self.draw_name_table(
+                right_offset,
+                (0, 0, 256, self.scroll_y as usize),
+                0,
+                240 - self.scroll_y as isize,
+            );
+        }
+    }
+
+    fn draw_name_table(
+        &mut self,
+        offset: usize,
+        view: (usize, usize, usize, usize),
+        shift_x: isize,
+        shift_y: isize,
+    ) {
+        let scanline = self.scanline as usize;
+        let row = scanline / 8;
 
         let table = self.read_name_table_address();
         let bank = self.read_bg_table_address();
         let image_palette = self.get_image_palette();
 
         for col in 0..32 {
-            let tile_addr = table as usize + (row * 32 + col);
-            let pattern = bank | ((self.vram[tile_addr] as u16) << 4);
+            let tile_addr = table + (offset as u16) + ((row as u16) * 32 + (col as u16));
+            let pattern = bank | ((self.read_mirrored_vram(tile_addr) as u16) << 4);
 
-            let attr_addr = table as usize + 0x03C0 + (row / 4) * 8 + (col / 4);
-            let attr = self.vram[attr_addr as usize];
+            let attr_addr = (table as usize) + offset + 0x03C0 + (row / 4) * 8 + (col / 4);
+            let attr = self.vram[attr_addr];
             let palette_id = (attr >> (2 * (col % 4 / 2) + 4 * (row % 4 / 2))) & 0x03;
 
-            let y = self.scanline % 8;
+            let y = scanline % 8;
             for x in 0..8 {
                 let color_idx_lo = self.vram[(pattern + y as u16) as usize];
                 let color_idx_lo = (color_idx_lo >> (7 - x)) & 1;
@@ -330,12 +447,21 @@ impl PPU {
                 let color_id = image_palette[palette_id as usize * 4 + color_idx];
                 let color_hex = self.system_palette[color_id as usize];
 
-                self.set_framebuffer_pixel(col * 8 + x, row * 8 + y, color_hex);
+                let pixel_x = (col * 8 + x).wrapping_add_signed(shift_x);
+                let pixel_y = (row * 8 + y).wrapping_add_signed(shift_y);
+
+                if pixel_x < view.0 || pixel_x >= view.2 || pixel_y < view.1 || pixel_y >= view.3 {
+                    continue;
+                }
+
+                self.set_framebuffer_pixel(pixel_x, pixel_y, color_hex);
             }
         }
     }
 
     fn draw_sprite_scanline(&mut self, priority_type: SpritePriority) {
+        let scanline = self.scanline as usize;
+
         if self.scanline == 0 || !self.show_spr {
             return;
         }
@@ -360,7 +486,7 @@ impl PPU {
             let sprite_x = self.oam[sprite + 3] as usize;
             let sprite_y = self.oam[sprite] as usize;
 
-            if sprite_y > self.scanline || sprite_y + 8 <= self.scanline || sprite_y >= 0xEF {
+            if sprite_y > scanline || sprite_y + 8 <= scanline || sprite_y >= 0xEF {
                 continue;
             }
 
@@ -371,7 +497,7 @@ impl PPU {
             let flip_h = (attr & 0b01000000) != 0;
             let flip_v = (attr & 0b10000000) != 0;
 
-            let y = self.scanline - sprite_y;
+            let y = scanline - sprite_y;
             for x in 0..8 {
                 let color_idx_lo = self.vram[(pattern + y) as usize];
                 let color_idx_lo = (color_idx_lo >> (7 - x)) & 1;

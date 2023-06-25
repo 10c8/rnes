@@ -13,7 +13,7 @@ const ROM_CTRL1_ADDR: u8 = 0x06;
 const ROM_CTRL2_ADDR: u8 = 0x07;
 const RAM_BANK_COUNT_ADDR: u8 = 0x08;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MirrorMode {
     Horizontal,
     Vertical,
