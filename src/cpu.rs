@@ -1044,10 +1044,10 @@ impl CPU {
         match address {
             0x0000..=0x1FFF => self.ram[address as usize],
             0x2000..=0x2007 => match address {
-                0x2002 => self.ppu.read_status(),
-                0x2004 => self.ppu.oam_read(),
-                0x2007 => self.ppu.vram_read(),
-                _ => 0xFF,
+                0x2000 | 0x2001 | 0x2002 => self.ppu.read_status(),
+                0x2003 | 0x2004 => self.ppu.oam_read(),
+                0x2005 | 0x2006 | 0x2007 => self.ppu.vram_read(),
+                _ => unreachable!(),
             },
             0x2008..=0x3FFF => self.ram[(address - 0x2000) as usize],
             0x4000..=0x401F => 0x00, // TODO: I/O registers
@@ -1175,8 +1175,8 @@ impl CPU {
     fn trace_opcode<S: Into<String>>(&mut self, pc_offset: u16, opcode: S, disasm: S) {
         // let opcode = opcode.into();
         // let disasm = disasm.into();
-        // let ppu_cycle = self.ppu.get_current_cycle();
         // let ppu_scanline = self.ppu.get_scanline();
+        // let ppu_cycle = self.ppu.get_current_cycle();
 
         // let line = format!(
         //     "{:04X}  {}{}{}{}A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} PPU:{}{},{}{} CYC:{}",
