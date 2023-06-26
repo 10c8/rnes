@@ -60,6 +60,14 @@ impl InternalRegister {
         self.value = (self.value & 0x00FF) | (value as u16) << 8;
     }
 
+    pub fn increment_all(&mut self, value: u16) {
+        self.value = self.value.wrapping_add(value);
+
+        if self.value > 0x3FFF {
+            self.value = (self.value % 0x4000) + 0x2000;
+        }
+    }
+
     pub fn increment(&mut self, part: IRPart) {
         match part {
             IRPart::CoarseX => {
@@ -180,6 +188,8 @@ pub struct PPU {
     pub nmi_occurred: bool,
     current_cycle: usize,
     scanline: isize,
+
+    trace_log: File,
 }
 
 impl PPU {
@@ -202,6 +212,8 @@ impl PPU {
 
             palette[i] = (r << 16) | (g << 8) | b;
         }
+
+        let trace_log = File::create("./ppu.log").unwrap();
 
         Self {
             vram: vec![0; 0x10000],
@@ -267,7 +279,21 @@ impl PPU {
             nmi_occurred: false,
             current_cycle: 0,
             scanline: -1,
+
+            trace_log,
         }
+    }
+
+    pub fn trace<S: Into<String>>(&mut self, msg: S) {
+        let msg = format!(
+            "{:03},{:03}  v:{:04X} t:{:04X}  {}\n",
+            self.get_scanline(),
+            self.current_cycle,
+            self.v_reg.get(IRPart::All),
+            self.t_reg.get(IRPart::All),
+            msg.into()
+        );
+        self.trace_log.write_all(msg.as_bytes()).unwrap();
     }
 
     pub fn load_cartridge(&mut self, cartridge: &Cartridge) {
@@ -587,7 +613,7 @@ impl PPU {
         }
 
         let inc = if self.vram_addr_inc { 32 } else { 1 };
-        self.v_reg.set(IRPart::All, v.wrapping_add(inc));
+        self.v_reg.increment_all(inc);
 
         result
     }
@@ -602,7 +628,7 @@ impl PPU {
         self.internal_write(v, data);
 
         let inc = if self.vram_addr_inc { 32 } else { 1 };
-        self.v_reg.set(IRPart::All, v.wrapping_add(inc));
+        self.v_reg.increment_all(inc);
     }
 
     pub fn oam_read(&self) -> u8 {

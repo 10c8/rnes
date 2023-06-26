@@ -1043,12 +1043,21 @@ impl CPU {
 
         match address {
             0x0000..=0x1FFF => self.ram[address as usize],
-            0x2000..=0x2007 => match address {
-                0x2000 | 0x2001 | 0x2002 => self.ppu.read_status(),
-                0x2003 | 0x2004 => self.ppu.oam_read(),
-                0x2005 | 0x2006 | 0x2007 => self.ppu.vram_read(),
-                _ => unreachable!(),
-            },
+            0x2000..=0x2007 => {
+                let value = match address {
+                    0x2000 | 0x2001 => 0xFF, // TODO: Open bus
+                    0x2002 => self.ppu.read_status(),
+                    0x2003 | 0x2004 => self.ppu.oam_read(),
+                    0x2005 | 0x2006 => 0xFF, // TODO: Open bus
+                    0x2007 => self.ppu.vram_read(),
+                    _ => unreachable!(),
+                };
+
+                self.ppu
+                    .trace(format!("PPU READ  @ ${:04X} = {:02X}", address, value));
+
+                value
+            }
             0x2008..=0x3FFF => self.ram[(address - 0x2000) as usize],
             0x4000..=0x401F => 0x00, // TODO: I/O registers
             0x4020..=0xFFFF => {
@@ -1114,6 +1123,9 @@ impl CPU {
                     }
                     _ => unreachable!(),
                 }
+
+                self.ppu
+                    .trace(format!("PPU WRITE @ ${:04X} = {:02X}", address, value));
             }
             0x2008..=0x3FFF => self.ram[(address - 0x2008) as usize] = value,
             0x4000..=0x4013 => {} // TODO: pAPU registers
@@ -1129,6 +1141,9 @@ impl CPU {
                 for i in start_address..=end_address {
                     let data = self.memory_read(i);
                     self.ppu.oam_write(data);
+
+                    self.ppu
+                        .trace(format!("PPU DMA   @ ${:04X} = {:02X}", i, data));
                 }
 
                 self.cycles += if align == 0 { 513 } else { 514 };
