@@ -45,8 +45,8 @@ fn init(_app: &mut App, gfx: &mut Graphics) -> State {
     }
 
     info!("Loading cartridge from ROM file...");
-    let cart = Cartridge::from_rom_file("resources/roms/games/Donkey Kong (U) (PRG1) [!].nes");
-    // let cart = Cartridge::from_rom_file("resources/roms/nestest.nes");
+    // let cart = Cartridge::from_rom_file("resources/roms/games/Donkey Kong (U) (PRG1) [!].nes");
+    let cart = Cartridge::from_rom_file("resources/roms/nestest.nes");
     cpu.load_cartridge(cart);
 
     info!("Starting...");
