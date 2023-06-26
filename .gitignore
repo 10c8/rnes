@@ -1,6 +1,6 @@
 /debugger
 /target
-/resources/roms
+/resources
 
 *.log
 *.cdl
